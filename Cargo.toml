@@ -1,0 +1,12 @@
+[package]
+name = "flower-paging-workshop"
+version = "0.1.0"
+authors = ["restioson <restiosondev@gmail.com>"]
+
+[dependencies]
+spin = "0.4.6"
+array-init = "0.0.2"
+
+[dependencies.lazy_static]
+version = "1.0.0"
+features = ["spin_no_std"]
