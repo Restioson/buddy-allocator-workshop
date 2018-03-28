@@ -1,8 +1,18 @@
 # Buddy Allocator Workshop
 
 This repository contains some small example implementations of buddy
-allocators. They are designed to allocate physical memory. Eventually,
-the best performing one will be merged into [flower][1].
+allocators. They are designed to allocate physical memory, although they
+could be used for other types of allocation, such as the heap.
+Eventually, the best performing one will be merged into [flower][1].
+
+# Getting Started
+
+First, clone the repo. Then, `cd` into it and do `cargo run` to run the
+vector allocator. Don't worry, it won't actually allocate anything --
+only mock memory blocks. You can change edit the source to make it run
+other implementations, change min/max block sizes, etc. To run the unit
+tests, run `cargo test`. Unfortunately there are no cargo benchmarks yet,
+but I have benchmarked it rather unscientifically on my Windows machine.
 
 # Implementations
 
