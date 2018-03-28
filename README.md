@@ -42,7 +42,7 @@ block in its order list. You can find this algorithm in
 
 ### Vectors
 A quick, un-scientific benchmark on my Windows machine says that it took
-around two minutes to allocate a full gibbibyte (1024^3 bytes). I did
+around two minutes to allocate a full gibibyte (1024^3 bytes). I did
 notice split second pauses every now and again when it had to reallocate
 the entire vector to push an element.
 
