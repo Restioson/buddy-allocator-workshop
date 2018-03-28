@@ -26,3 +26,13 @@ the same implementation with vectors. However, this implementation
 wasn't optimised for linked lists, so it is slightly unfair. Unlike the
 implementation with vectors, I did not notice any pauses, but allocation
 gradually got slower and slower.
+
+----
+
+We can conclude that although doubly linked lists *in theory* are faster
+at pushing than vectors are, they were still 12 times slower than
+vectors. This could be because the implementation was slightly in favour
+of vectors (lots of indexing), or because the vectors had a higher cache
+locality and therefore experienced less cache misses, while linked lists
+experience high cache misses as they have individually heap-allocated
+elements.
