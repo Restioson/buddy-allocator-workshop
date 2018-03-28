@@ -55,5 +55,5 @@ locality and therefore experienced less cache misses, while linked lists
 experience high cache misses as they have individually heap-allocated
 elements.
 
-[1]: https://github.com/Restioson/flower)
+[1]: https://github.com/Restioson/flower
 [2]: https://github.com/Restioson/buddy-allocator-workshop/blob/master/src/buddy_allocator_lists.rs#L256
