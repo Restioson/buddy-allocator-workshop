@@ -1,4 +1,6 @@
-use core::collections::LinkedList;
+use std::collections::LinkedList;
+use std::vec::Vec;
+use std::marker::PhantomData;
 use super::*;
 
 // number of orders
@@ -19,8 +21,106 @@ pub enum BlockState {
     Free,
 }
 
-pub struct BuddyAllocator {
-    lists: [LinkedList<Block>; ORDERS as usize],
+pub trait BlockList<'a> {
+    type Iter: Iterator<Item = &'a Block>;
+    type IterMut: Iterator<Item = &'a mut Block>;
+
+    fn push(&mut self, item: Block);
+    fn iter(&self) -> Self::Iter;
+    fn iter_mut(&mut self) -> Self::IterMut;
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> Option<&Block>;
+    fn get_mut(&mut self, index: usize) -> Option<&mut Block>;
+    fn remove(&mut self, index: usize);
+}
+
+impl<'a> BlockList<'a> for LinkedList<Block> {
+    type Iter = std::collections::linked_list::Iter<'a, Block>;
+    type IterMut = std::collections::linked_list::IterMut<'a, Block>;
+
+    fn push(&mut self, item: Block) {
+        self.push_back(item)
+    }
+
+    fn iter(&self) -> Self::Iter {
+        LinkedList::iter(self)
+    }
+
+    fn iter_mut(&mut self) -> Self::IterMut {
+        LinkedList::iter_mut(self)
+    }
+
+    fn len(&self) -> usize {
+        LinkedList::len(self)
+    }
+
+    fn get(&self, index: usize) -> Option<&Block> {
+        let len = self.len();
+        if len == 0 {
+            return None;
+        }
+
+        if index < len / 2 {
+            self.iter().nth(index)
+        } else {
+            self.iter().rev().nth(len - 1 - index)
+        }
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut Block> {
+        let len = self.len();
+        if len == 0 {
+            return None;
+        }
+
+        if index < len / 2 {
+            self.iter_mut().nth(index)
+        } else {
+            self.iter_mut().rev().nth(len - 1 - index)
+        }
+    }
+    fn remove(&mut self, index: usize) {
+        let mut second_part = self.split_off(index);
+        second_part.pop_front();
+        self.append(&mut second_part);
+    }
+}
+
+impl<'a> BlockList<'a> for Vec<Block> {
+    type Iter = std::slice::Iter<'a, Block>;
+    type IterMut = std::slice::IterMut<'a, Block>;
+
+    fn push(&mut self, item: Block) {
+        Vec::push(self, item);
+    }
+
+    fn iter(&self) -> Self::Iter {
+        <[Block]>::iter(&*self)
+    }
+
+    fn iter_mut(&mut self) -> Self::IterMut {
+        <[Block]>::iter_mut(&mut *self)
+    }
+
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn get(&self, index: usize) -> Option<&Block> {
+        <[Block]>::get(&*self, index)
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut Block> {
+        <[Block]>::get_mut(&mut *self, index)
+    }
+    fn remove(&mut self, index: usize) {
+        self.remove(index);
+    }
+}
+
+pub struct BuddyAllocator<'a, L: BlockList<'a>> {
+    _phantom: PhantomData<&'a ()>,
+    lists: [L; ORDERS as usize],
 }
 
 /// A very temporary block index. Is not to be trusted to remain pointing to the same block. Use at
@@ -31,11 +131,25 @@ struct BlockIndex {
     index: usize,
 }
 
-impl BuddyAllocator {
+impl<'a> BuddyAllocator<'a, LinkedList<Block>> {
     pub fn new() -> Self {
-        BuddyAllocator { lists: array_init::array_init(|_| LinkedList::new()) }
+        BuddyAllocator {
+            _phantom: PhantomData,
+            lists: array_init::array_init(|_| LinkedList::new()),
+        }
     }
+}
 
+impl<'a> BuddyAllocator<'a, Vec<Block>> {
+    pub fn new() -> Self {
+        BuddyAllocator {
+            _phantom: PhantomData,
+            lists: array_init::array_init(|_| Vec::new()),
+        }
+    }
+}
+
+impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
     /// Get the index of a block
     fn index_of(&self, block: &Block) -> Option<BlockIndex> {
         Some(BlockIndex {
@@ -52,19 +166,8 @@ impl BuddyAllocator {
     ///
     /// Panics if the order is larger than maximum. This indicates a programming error.
     fn get(&self, block: &BlockIndex) -> Option<&Block> {
-        let len = self.lists[block.order as usize].len();
-        if len == 0 {
-            return None;
-        }
-
-        if block.index < self.lists[block.order as usize].len() / 2 {
-            self.lists[block.order as usize].iter().nth(block.index)
-        } else {
-            self.lists[block.order as usize].iter().rev().nth(
-                len - 1 -
-                    block.index,
-            )
-        }
+        let list = &self.lists[block.order as usize];
+        list.get(block.index)
     }
 
     /// Get a block by its index mutably.
@@ -73,18 +176,8 @@ impl BuddyAllocator {
     ///
     /// Panics if the order is larger than maximum. This indicates a programming error.
     fn get_mut(&mut self, block: &BlockIndex) -> Option<&mut Block> {
-        let len = self.lists[block.order as usize].len();
-        if len == 0 {
-            return None;
-        }
-
-        if block.index < self.lists[block.order as usize].len() / 2 {
-            self.lists[block.order as usize].iter_mut().nth(block.index)
-        } else {
-            self.lists[block.order as usize].iter_mut().rev().nth(
-                len - 1 - block.index,
-            )
-        }
+        let list = &mut self.lists[block.order as usize];
+        list.get_mut(block.index)
     }
 
 
@@ -101,7 +194,7 @@ impl BuddyAllocator {
 
     /// Create a top level block
     pub fn create_top_level(&mut self, begin_address: usize) {
-        self.lists[ORDERS as usize - 1].push_back(Block {
+        self.lists[ORDERS as usize - 1].push(Block {
             begin_address,
             order: ORDERS - 1,
             state: BlockState::Free,
@@ -150,14 +243,11 @@ impl BuddyAllocator {
             block
         });
 
-        // Remove original block
-        let mut second_part = self.lists[original_order as usize].split_off(index.index);
-        second_part.pop_front();
-        self.lists[original_order as usize].append(&mut second_part);
+        self.lists[original_order as usize].remove(index.index);
 
         let [first, second] = buddies;
-        self.lists[order as usize].push_back(first);
-        self.lists[order as usize].push_back(second);
+        self.lists[order as usize].push(first);
+        self.lists[order as usize].push(second);
 
         Ok(BlockIndex {
             order,
@@ -215,7 +305,7 @@ pub enum BlockAllocateError {
     NoBlocksAvailable,
 }
 
-impl PhysicalAllocator for BuddyAllocator {
+impl<'a, L: BlockList<'a>> PhysicalAllocator for BuddyAllocator<'a, L> {
     fn alloc(&mut self, size: PageSize) -> *const u8 {
         let index = self.allocate_exact(size.get_power_of_two() - MIN_ORDER)
             .unwrap();
@@ -227,6 +317,18 @@ impl PhysicalAllocator for BuddyAllocator {
         unimplemented!()
     }
 }
+
+pub fn demo_vec() {
+    let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
+
+    allocator.create_top_level(0);
+
+    for _ in 0..1000 {
+        let addr = allocator.alloc(PageSize::Kib4) as usize;
+        println!("Address: {:#x}", addr);
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -287,8 +389,8 @@ mod test {
     }
 
     #[test]
-    fn test_get() {
-        let mut allocator = BuddyAllocator::new();
+    fn test_get_linked_list() {
+        let mut allocator = BuddyAllocator::<_, LinkedList<Block>>::new();
         allocator.create_top_level(0);
         allocator.create_top_level(1024 * 1024 * 1024);
 
@@ -323,8 +425,8 @@ mod test {
     }
 
     #[test]
-    fn test_get_mut() {
-        let mut allocator = BuddyAllocator::new();
+    fn test_get_mut_linked_list() {
+        let mut allocator = BuddyAllocator::<_, LinkedList<Block>>::new();
         allocator.create_top_level(0);
         allocator.create_top_level(1024 * 1024 * 1024);
 
