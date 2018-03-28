@@ -1,12 +1,9 @@
-#![feature(const_fn)]
 #![feature(nll)]
 #![feature(slice_patterns)]
 
-mod buddy_allocator_lists;
-
-#[macro_use]
-extern crate lazy_static;
 extern crate array_init;
+
+mod buddy_allocator_lists;
 
 trait PhysicalAllocator {
     fn alloc(&mut self, size: PageSize) -> *const u8;

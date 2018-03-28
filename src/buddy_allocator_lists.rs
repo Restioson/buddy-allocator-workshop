@@ -150,16 +150,6 @@ impl<'a> BuddyAllocator<'a, Vec<Block>> {
 }
 
 impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
-    /// Get the index of a block
-    fn index_of(&self, block: &Block) -> Option<BlockIndex> {
-        Some(BlockIndex {
-            order: block.order,
-            index: self.lists[block.order as usize].iter().position(
-                |i| i == block,
-            )?,
-        })
-    }
-
     /// Get a block by its index.
     ///
     /// # Panicking
@@ -335,21 +325,22 @@ mod test {
     use super::*;
     #[test]
     fn test_create_top_level() {
-        let mut allocator = BuddyAllocator::new();
+        let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
         allocator.create_top_level(2usize.pow((MIN_ORDER + ORDERS - 1) as u32));
 
-        let mut expected = LinkedList::new();
-        expected.push_back(Block {
-            begin_address: 0,
-            order: ORDERS - 1,
-            state: BlockState::Free,
-        });
-        expected.push_back(Block {
-            begin_address: 2usize.pow((MIN_ORDER + ORDERS - 1) as u32),
-            order: ORDERS - 1,
-            state: BlockState::Free,
-        });
+        let expected = vec![
+            Block {
+                begin_address: 0,
+                order: ORDERS - 1,
+                state: BlockState::Free,
+            },
+            Block {
+                begin_address: 2usize.pow((MIN_ORDER + ORDERS - 1) as u32),
+                order: ORDERS - 1,
+                state: BlockState::Free,
+            },
+        ];
 
         assert_eq!(allocator.lists[ORDERS as usize - 1].len(), 2);
         assert_eq!(allocator.lists[ORDERS as usize - 1], expected);
@@ -357,7 +348,7 @@ mod test {
 
     #[test]
     fn test_split() {
-        let mut allocator = BuddyAllocator::new();
+        let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
         allocator
             .split(BlockIndex {
@@ -390,7 +381,7 @@ mod test {
 
     #[test]
     fn test_get_linked_list() {
-        let mut allocator = BuddyAllocator::<_, LinkedList<Block>>::new();
+        let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
         allocator.create_top_level(0);
         allocator.create_top_level(1024 * 1024 * 1024);
 
@@ -426,7 +417,7 @@ mod test {
 
     #[test]
     fn test_get_mut_linked_list() {
-        let mut allocator = BuddyAllocator::<_, LinkedList<Block>>::new();
+        let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
         allocator.create_top_level(0);
         allocator.create_top_level(1024 * 1024 * 1024);
 
@@ -462,7 +453,7 @@ mod test {
 
     #[test]
     fn test_allocate_exact_with_free() {
-        let mut allocator = BuddyAllocator::new();
+        let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
         let index = allocator.allocate_exact(ORDERS - 1).unwrap();
         let expected_block = Block {
@@ -475,7 +466,7 @@ mod test {
 
     #[test]
     fn test_allocate_exact_no_free() {
-        let mut allocator = BuddyAllocator::new();
+        let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
         let index = allocator.allocate_exact(ORDERS - 3).unwrap();
         let expected_block = Block {
