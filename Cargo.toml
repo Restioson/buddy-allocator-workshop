@@ -1,7 +1,12 @@
 [package]
-name = "buddy-allocator-workshop"
+name = "buddy_allocator_workshop"
 version = "0.1.0"
 authors = ["restioson <restiosondev@gmail.com>"]
 
 [dependencies]
+phf = "0.7.21"
+phf_macros = "0.7.21"
+static_assertions = "0.2.5"
+structopt = "0.2.5"
 array-init = "0.0.2"
+failure = "0.1.1"

@@ -1,11 +1,9 @@
+use std;
+use array_init;
 use std::collections::LinkedList;
 use std::vec::Vec;
 use std::marker::PhantomData;
-use super::*;
-
-// number of orders
-const ORDERS: u8 = 19;
-const MIN_ORDER: u8 = 12;
+use super::{PhysicalAllocator, PageSize, ORDERS, MAX_ORDER, MIN_ORDER};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Block {
@@ -107,11 +105,19 @@ impl<'a> BlockList<'a> for Vec<Block> {
     }
 
     fn get(&self, index: usize) -> Option<&Block> {
-        <[Block]>::get(&*self, index)
+        if self.len() > index {
+            Some(&self[index])
+        } else {
+            None
+        }
     }
 
     fn get_mut(&mut self, index: usize) -> Option<&mut Block> {
-        <[Block]>::get_mut(&mut *self, index)
+        if self.len() > index {
+            Some(&mut self[index])
+        } else {
+            None
+        }
     }
     fn remove(&mut self, index: usize) {
         self.remove(index);
@@ -184,9 +190,9 @@ impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
 
     /// Create a top level block
     pub fn create_top_level(&mut self, begin_address: usize) {
-        self.lists[ORDERS as usize - 1].push(Block {
+        self.lists[MAX_ORDER as usize].push(Block {
             begin_address,
-            order: ORDERS - 1,
+            order: MAX_ORDER,
             state: BlockState::Free,
         });
     }
@@ -254,9 +260,9 @@ impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
     /// Find a frame of a given order or splits other frames recursively until one is made. Does not
     /// set state to used.
     fn find_or_split(&mut self, order: u8) -> Result<BlockIndex, BlockAllocateError> {
-        if order >= ORDERS {
+        if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge {
-                max: ORDERS - 1,
+                max: MAX_ORDER,
                 received: order,
             });
         }
@@ -270,7 +276,7 @@ impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
         let block = match opt {
             Some(thing) => thing,
             None => {
-                if order >= ORDERS - 1 {
+                if order >= MAX_ORDER {
                     Err(BlockAllocateError::NoBlocksAvailable)
                 } else {
                     let block_index = self.find_or_split(order + 1)?;
@@ -297,7 +303,7 @@ pub enum BlockAllocateError {
 
 impl<'a, L: BlockList<'a>> PhysicalAllocator for BuddyAllocator<'a, L> {
     fn alloc(&mut self, size: PageSize) -> *const u8 {
-        let index = self.allocate_exact(size.get_power_of_two() - MIN_ORDER)
+        let index = self.allocate_exact(size.power_of_two() - MIN_ORDER)
             .unwrap();
         let block = self.get(&index).unwrap();
         block.begin_address as *const u8
@@ -308,17 +314,46 @@ impl<'a, L: BlockList<'a>> PhysicalAllocator for BuddyAllocator<'a, L> {
     }
 }
 
-pub fn demo_vec() {
-    let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
+pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
+    let allocator = BuddyAllocator::<LinkedList<Block>>::new();
+    demo(allocator, print_addresses, blocks, block_size)
+}
 
-    allocator.create_top_level(0);
+pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) {
+    let allocator = BuddyAllocator::<Vec<Block>>::new();
+    demo(allocator, print_addresses, blocks, block_size)
+}
 
-    for _ in 0..1000 {
-        let addr = allocator.alloc(PageSize::Kib4) as usize;
-        println!("Address: {:#x}", addr);
+fn demo<'a, L: BlockList<'a>>(
+    mut allocator: BuddyAllocator<'a, L>,
+    print_addresses: bool,
+    blocks: u32,
+    block_size: u8,
+) {
+    let top_level_blocks = top_level_blocks(blocks, block_size);
+
+    for block_number in 0..top_level_blocks {
+        allocator.create_top_level(
+            2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+        );
+    }
+
+    for _ in 0..blocks {
+        let index = allocator.allocate_exact(block_size).unwrap();
+        let addr = allocator.get(&index).unwrap().begin_address;
+
+        if print_addresses {
+            println!("Address: {:#x}", addr);
+        }
     }
 }
 
+fn top_level_blocks(blocks: u32, block_size: u8) -> u64 {
+    let a = 2f64.powi((block_size + MIN_ORDER) as i32) * blocks as f64 /
+        2f64.powi((MAX_ORDER + MIN_ORDER) as i32);
+
+    a.ceil() as u64
+}
 
 #[cfg(test)]
 mod test {
@@ -327,23 +362,23 @@ mod test {
     fn test_create_top_level() {
         let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(2usize.pow((MIN_ORDER + ORDERS - 1) as u32));
+        allocator.create_top_level(2usize.pow((MIN_ORDER + MAX_ORDER) as u32));
 
         let expected = vec![
             Block {
                 begin_address: 0,
-                order: ORDERS - 1,
+                order: MAX_ORDER,
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + ORDERS - 1) as u32),
-                order: ORDERS - 1,
+                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32),
+                order: MAX_ORDER,
                 state: BlockState::Free,
             },
         ];
 
-        assert_eq!(allocator.lists[ORDERS as usize - 1].len(), 2);
-        assert_eq!(allocator.lists[ORDERS as usize - 1], expected);
+        assert_eq!(allocator.lists[MAX_ORDER as usize - 1].len(), 0);
+        assert_eq!(allocator.lists[MAX_ORDER as usize], expected);
     }
 
     #[test]
@@ -353,27 +388,27 @@ mod test {
         allocator
             .split(BlockIndex {
                 index: 0,
-                order: ORDERS - 1,
+                order: MAX_ORDER,
             })
             .unwrap();
 
         let expected_blocks = [
             Block {
                 begin_address: 0,
-                order: ORDERS - 2,
+                order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + ORDERS) as u32 - 2),
-                order: ORDERS - 2,
+                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32 - 1),
+                order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
         ];
 
-        assert_eq!(allocator.lists[ORDERS as usize - 1].len(), 0);
-        assert_eq!(allocator.lists[ORDERS as usize - 2].len(), 2);
+        assert_eq!(allocator.lists[MAX_ORDER as usize - 1].len(), 2);
+        assert_eq!(allocator.lists[MAX_ORDER as usize].len(), 0);
 
-        allocator.lists[ORDERS as usize - 2]
+        allocator.lists[MAX_ORDER as usize - 1]
             .iter()
             .zip(expected_blocks.iter())
             .for_each(|(block, expected)| assert_eq!(block, expected));
@@ -389,7 +424,7 @@ mod test {
             allocator
                 .split(BlockIndex {
                     index: 0,
-                    order: ORDERS - 1,
+                    order: MAX_ORDER,
                 })
                 .unwrap()
         });
@@ -399,12 +434,12 @@ mod test {
         let expected_blocks = [
             Block {
                 begin_address: 0,
-                order: ORDERS - 2,
+                order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + ORDERS) as u32 - 2) * indices[1].index,
-                order: ORDERS - 2,
+                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32 - 1) * indices[1].index,
+                order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
         ];
@@ -425,7 +460,7 @@ mod test {
             allocator
                 .split(BlockIndex {
                     index: 0,
-                    order: ORDERS - 1,
+                    order: MAX_ORDER,
                 })
                 .unwrap()
         });
@@ -435,12 +470,12 @@ mod test {
         let expected_blocks = [
             Block {
                 begin_address: 0,
-                order: ORDERS - 2,
+                order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + ORDERS) as u32 - 2) * indices[1].index,
-                order: ORDERS - 2,
+                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32) * indices[1].index,
+                order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
         ];
@@ -455,10 +490,10 @@ mod test {
     fn test_allocate_exact_with_free() {
         let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
-        let index = allocator.allocate_exact(ORDERS - 1).unwrap();
+        let index = allocator.allocate_exact(MAX_ORDER).unwrap();
         let expected_block = Block {
             begin_address: 0,
-            order: ORDERS - 1,
+            order: MAX_ORDER,
             state: BlockState::Used,
         };
         assert_eq!(*allocator.get(&index).unwrap(), expected_block);
@@ -468,10 +503,10 @@ mod test {
     fn test_allocate_exact_no_free() {
         let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
-        let index = allocator.allocate_exact(ORDERS - 3).unwrap();
+        let index = allocator.allocate_exact(MAX_ORDER - 2).unwrap();
         let expected_block = Block {
             begin_address: 0,
-            order: ORDERS - 3,
+            order: MAX_ORDER - 2,
             state: BlockState::Used,
         };
 

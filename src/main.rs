@@ -1,9 +1,50 @@
+#![feature(plugin)]
+#![feature(const_fn)]
 #![feature(nll)]
 #![feature(slice_patterns)]
+#![feature(custom_attribute)]
+#![feature(duration_extras)]
 
+#![plugin(phf_macros)]
+
+#![allow(unused_attributes)]
+
+#[macro_use]
+extern crate structopt;
 extern crate array_init;
+extern crate phf;
+#[macro_use]
+extern crate failure;
+#[macro_use]
+extern crate static_assertions;
 
 mod buddy_allocator_lists;
+
+use std::time::Instant;
+use structopt::StructOpt;
+use failure::Fail;
+
+/// Number of orders. **This constant is OK to modify for configuration.**
+const ORDERS: u8 = 19;
+/// The maximum order. **This constant is not Ok to modify for configuration.**
+const MAX_ORDER: u8 = ORDERS - 1;
+/// The minimum order. All orders are in context of this -- i.e the size of a block of order `k` is
+/// `2^(k + MIN_ORDER)`, not `2^k`. **This constant is OK to modify for configuration.**
+///
+/// # Note
+///
+/// **NB: Must be greater than log base 2 of 4096.** This is so that 4kib pages can always be
+/// allocated, regardless of min order.
+const MIN_ORDER: u8 = 12;
+const_assert!(__min_order_less_or_eq_than_4kib; MIN_ORDER <= 12);
+
+#[rustfmt_skip] // Puts phf_map! with same indentation level as the key => value
+static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
+    "linked_lists" => buddy_allocator_lists::demo_linked_lists,
+    "vecs" => buddy_allocator_lists::demo_vecs,
+};
+
+const DEFAULT_DEMOS: &'static [&'static str] = &["vecs", "linked_lists"];
 
 trait PhysicalAllocator {
     fn alloc(&mut self, size: PageSize) -> *const u8;
@@ -18,7 +59,7 @@ pub enum PageSize {
 }
 
 impl PageSize {
-    fn get_power_of_two(self) -> u8 {
+    fn power_of_two(self) -> u8 {
         use self::PageSize::*;
         match self {
             Kib4 => 12,
@@ -28,8 +69,108 @@ impl PageSize {
     }
 }
 
-fn main() {
-    // Demo the lists allocator
-    buddy_allocator_lists::demo_vec();
+#[derive(StructOpt, Debug)]
+#[structopt(name = "buddy_allocator_workshop")]
+struct Options {
+    /// Print the addresses of the blocks allocated
+    #[structopt(short = "p", long = "print-addresses")]
+    print_addresses: bool,
+    /// Which demos to run. Defaults to all demos. Accepted values: `vecs`, `linked_lists`
+    #[structopt(short = "d", long = "demos")]
+    demos: Vec<String>,
+    /// How many blocks to demo allocate. Defaults to 100 000
+    #[structopt(short = "b", long = "blocks")]
+    blocks: Option<u32>,
+    /// The order of the blocks to allocate. Defaults to `0`, which is `2^MIN_ORDER` bytes. Must not
+    /// be greater than `MAX_ORDER`.
+    #[structopt(short = "o", long = "order")]
+    order: Option<u8>,
+}
 
+#[derive(Debug, Fail)]
+enum DemosError {
+    #[fail(display = "Unknown demo \"{}\"", name)]
+    UnknownDemo { name: String },
+    #[fail(display = "Order {} too large, max is {}", order, max_order)]
+    OrderTooLarge {
+        order: u8,
+        /// Must be equal to [MAX_ORDER]. Required as a field due to a limitation in fail.
+        max_order: u8,
+    },
+}
+
+fn main() {
+    let Options {
+        print_addresses,
+        demos,
+        blocks,
+        order,
+    } = Options::from_args();
+
+    let demos = if demos.is_empty() {
+        DEFAULT_DEMOS.iter().map(|s| s.to_string()).collect()
+    } else {
+        demos
+    };
+
+    let (blocks, order) = (
+        blocks.unwrap_or(100_000),
+        order.unwrap_or(PageSize::Kib4.power_of_two() - MIN_ORDER),
+    );
+
+    if order > MAX_ORDER {
+        raise(DemosError::OrderTooLarge {
+            order,
+            max_order: MAX_ORDER,
+        });
+    }
+
+    demos
+        .into_iter()
+        .map(|name| {
+            (
+                DEMOS
+                    .get(&*name)
+                    .ok_or(DemosError::UnknownDemo { name: name.to_string() })
+                    .raise(),
+                name,
+            )
+        })
+        .collect::<Vec<_>>() // Force detect unknown demos ASAP
+        .into_iter()
+        .for_each(|(demo, name)| {
+            run_demo(*demo, print_addresses, blocks, order, name)
+        })
+}
+
+trait ResultExt<T> {
+    fn raise(self) -> T;
+}
+
+impl<T, E: Fail> ResultExt<T> for Result<T, E> {
+    fn raise(self) -> T {
+        match self {
+            Ok(ok) => ok,
+            Err(err) => raise(err),
+        }
+    }
+}
+
+fn raise<F: Fail>(failure: F) -> ! {
+    println!("error: {}", failure);
+    std::process::exit(1)
+}
+
+fn run_demo(demo: fn(bool, u32, u8), print_addresses: bool, blocks: u32, order: u8, name: String) {
+    const NANOS_PER_SEC: f64 = 1_000_000_000.0; // Taken from std::time::Duration because las
+
+    println!("Running {} demo...", name);
+    let begin = Instant::now();
+    demo(print_addresses, blocks, order);
+    let time_taken = Instant::now().duration_since(begin);
+    println!(
+        "Finished {} demo in {}s",
+        name.replace('_', " "),
+        time_taken.as_secs() as f64 + time_taken.subsec_nanos() as f64 / NANOS_PER_SEC,
+    );
 }
