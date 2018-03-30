@@ -41,7 +41,7 @@ a gibibyte in 4kib blocks. If you have any other benchmarks to add
 | Lists - Vectors             | 2min  |
 | Lists - Doubly Linked Lists | 25min |
 
-## List Based
+## Naive List Based Implementation
 
 This implementation keeps a list per order of block. It is generic over
 the typeof lists used. I decided to use two kinds of lists: vectors
