@@ -22,11 +22,10 @@ on my Windows machine.
 
 ## Benchmark
 
-I did an unscientific benchmark done on my Windows machine by timing
-various implementations using the builtin reporting, allocating a
-gibibyte in 4kib blocks (with printing off). If you have any other
-benchmarks to add (possibly more scientific ones), please see
-[Contributing][contributing section]
+I tested the algorithms by timing various implementations using the
+builtin reporting, allocating a gibibyte in 4kib blocks (with printing
+off) on my Windows machine. If you have any other benchmarks to add,
+please see [Contributing][contributing section].
 
 ### Specifications
 
@@ -45,7 +44,7 @@ benchmarks to add (possibly more scientific ones), please see
 
 **Note:** The throughput is extrapolated from the time it took to
 allocate 1 GiB in 4kib blocks. For implementations that have complexity
->O(log n) (such as the naive list based implementation), this will not
+\>O(log n) (such as the naive list based implementation), this will not
 be accurate -- the throughput will slow down as more blocks are
 allocated. This should be accurate for ones that have a complexity
 of O(log n) or less though.
