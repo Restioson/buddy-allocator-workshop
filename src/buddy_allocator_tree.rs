@@ -1,5 +1,6 @@
 use bit_field::BitField;
 use std::cell::Cell;
+use std::ptr;
 use std::cmp::{Ord, PartialOrd, Eq, PartialEq, Ordering};
 use array_init;
 use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter, SinglyLinkedList, SinglyLinkedListLink};
@@ -91,56 +92,56 @@ pub struct BuddyAllocator<L: FreeList> {
 }
 
 pub trait FreeList {
-    fn push(&mut self, addr: usize);
-    fn pop(&mut self) -> Option<usize>;
+    fn push(&mut self, block: *const Block);
+    fn pop(&mut self) -> Option<*const Block>;
     /// Search for an address and remove it from the list
-    fn remove(&mut self, addr: usize) -> Option<()>;
+    fn remove(&mut self, addr: *const Block) -> Option<()>;
 }
 
-impl FreeList for Vec<usize> {
-    fn push(&mut self, addr: usize) {
-        Vec::push(self, addr);
+impl FreeList for Vec<*const Block> {
+    fn push(&mut self, block: *const Block) {
+        Vec::push(self, block);
     }
 
-    fn pop(&mut self) -> Option<usize> {
+    fn pop(&mut self) -> Option<*const Block> {
         Vec::pop(self)
     }
 
-    fn remove(&mut self, addr: usize) -> Option<()> {
-        self.remove(self.iter().position(|i| *i == addr)?);
+    fn remove(&mut self, block: *const Block) -> Option<()> {
+        self.remove(self.iter().position(|i| ptr::eq(*i, block))?);
         Some(())
     }
 }
 
 #[derive(Debug)]
-struct Address {
+struct BlockPtr {
     link: SinglyLinkedListLink,
-    address: usize,
+    ptr: *const Block,
 }
 
-impl Address {
-    /// Creates a new, unlinked [Address].
-    fn new(address: usize) -> Address {
-        Address {
+impl BlockPtr {
+    /// Creates a new, unlinked [BlockPtrAdapter].
+    fn new(ptr: *const Block) -> BlockPtr {
+        BlockPtr {
             link: SinglyLinkedListLink::new(),
-            address,
+            ptr
         }
     }
 }
 
-intrusive_adapter!(AddressAdapter = Box<Address>: Address { link: SinglyLinkedListLink });
+intrusive_adapter!(BlockPtrAdapter = Box<BlockPtr>: BlockPtr { link: SinglyLinkedListLink });
 
-impl FreeList for SinglyLinkedList<AddressAdapter> {
-    fn push(&mut self, addr: usize) {
-        self.push_front(Box::new(Address::new(addr)))
+impl FreeList for SinglyLinkedList<BlockPtrAdapter> {
+    fn push(&mut self, block: *const Block) {
+        self.push_front(Box::new(BlockPtr::new(block)))
     }
 
-    fn pop(&mut self) -> Option<usize> {
-        self.pop_front().map(|b| b.address)
+    fn pop(&mut self) -> Option<*const Block> {
+        self.pop_front().map(|b| b.ptr)
     }
 
-    fn remove(&mut self, addr: usize) -> Option<()> {
-        let pos = self.iter().position(|i| i.address == addr)?;
+    fn remove(&mut self, block: *const Block) -> Option<()> {
+        let pos = self.iter().position(|i| ptr::eq(i.ptr, block))?;
 
         let mut cursor = self.front_mut();
 
@@ -157,7 +158,7 @@ impl FreeList for SinglyLinkedList<AddressAdapter> {
     }
 }
 
-impl BuddyAllocator<Vec<usize>> {
+impl BuddyAllocator<Vec<*const Block>> {
     fn new() -> Self {
         BuddyAllocator {
             tree: RBTree::new(BlockAdapter::new()),
@@ -166,21 +167,22 @@ impl BuddyAllocator<Vec<usize>> {
     }
 }
 
-impl BuddyAllocator<SinglyLinkedList<AddressAdapter>> {
+impl BuddyAllocator<SinglyLinkedList<BlockPtrAdapter>> {
     fn new() -> Self {
         BuddyAllocator {
             tree: RBTree::new(BlockAdapter::new()),
-            free: array_init::array_init(|_| SinglyLinkedList::new(AddressAdapter::new())),
+            free: array_init::array_init(|_| SinglyLinkedList::new(BlockPtrAdapter::new())),
         }
     }
 }
 
 impl<L: FreeList> BuddyAllocator<L> {
     fn create_top_level(&mut self, begin_address: usize) -> CursorMut<BlockAdapter> {
-        self.free[MAX_ORDER as usize].push(begin_address);
-        self.tree.insert(Box::new(
+        let cursor = self.tree.insert(Box::new(
             Block::new(begin_address, MAX_ORDER, false),
-        ))
+        ));
+        self.free[MAX_ORDER as usize].push(cursor.get().unwrap() as *const _);
+        cursor
     }
 
     /// Splits a block in place, returning the addresses of the two blocks split. Does not add them
@@ -190,7 +192,7 @@ impl<L: FreeList> BuddyAllocator<L> {
     ///
     /// 1. Index incorrect and points null block (this is a programming error)
     /// 2. Attempt to split used block (this is also a programming error)
-    fn split(cursor: &mut CursorMut<BlockAdapter>) -> Result<[usize; 2], BlockSplitError> {
+    fn split(cursor: &mut CursorMut<BlockAdapter>) -> Result<[*const Block; 2], BlockSplitError> {
         let block = cursor.get().unwrap();
 
         if block.used() {
@@ -217,12 +219,20 @@ impl<L: FreeList> BuddyAllocator<L> {
         });
 
         let [first, second] = buddies;
-        let addrs = [first.address(), second.address()];
 
         cursor.replace_with(Box::new(first)).unwrap();
         cursor.insert_after(Box::new(second));
 
-        Ok(addrs)
+        let ptrs: [*const _; 2] = array_init::array_init(|i| {
+            if i == 1 {
+                cursor.move_next();
+            }
+            cursor.get().unwrap() as *const _
+        });
+
+        cursor.move_prev();
+
+        Ok(ptrs)
     }
 
 
@@ -245,7 +255,7 @@ impl<L: FreeList> BuddyAllocator<L> {
         let next_free = free[order as usize].pop();
 
         match next_free {
-            Some(addr) => Ok(tree.find_mut(&addr)),
+            Some(ptr) => Ok(unsafe { tree.cursor_mut_from_ptr(ptr) }),
             None if order == MAX_ORDER => Err(BlockAllocateError::NoBlocksAvailable),
             None => {
                 let mut cursor = BuddyAllocator::find_or_split(free, tree, order + 1)?;
@@ -253,13 +263,13 @@ impl<L: FreeList> BuddyAllocator<L> {
 
 
                 // Split block and remove it from the free list
-                let old_address = cursor.get().unwrap().address();
-                let addresses = Self::split(&mut cursor).unwrap();
-                free[order as usize + 1].remove(old_address);
+                let old_ptr = cursor.get().unwrap() as *const _;
+                let ptrs = Self::split(&mut cursor).unwrap();
+                free[order as usize + 1].remove(old_ptr);
 
                 // Push split blocks to free list
-                free[order as usize].push(addresses[0]);
-                free[order as usize].push(addresses[1]);
+                free[order as usize].push(ptrs[0]);
+                free[order as usize].push(ptrs[1]);
 
                 Ok(cursor)
             }
@@ -278,8 +288,8 @@ impl<L: FreeList> BuddyAllocator<L> {
             block.get().unwrap().set_used(true);
         }
 
-        let address = block.get().unwrap().address();
-        self.free[order as usize].remove(address);
+        let ptr = block.get().unwrap() as *const _ ;
+        self.free[order as usize].remove(ptr);
 
         Ok(block)
     }
@@ -297,12 +307,12 @@ pub enum BlockAllocateError {
 }
 
 pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) {
-    let allocator = BuddyAllocator::<Vec<usize>>::new();
+    let allocator = BuddyAllocator::<Vec<*const Block>>::new();
     demo(allocator, print_addresses, blocks, block_size)
 }
 
 pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
-    let allocator = BuddyAllocator::<SinglyLinkedList<AddressAdapter>>::new();
+    let allocator = BuddyAllocator::<SinglyLinkedList<BlockPtrAdapter>>::new();
     demo(allocator, print_addresses, blocks, block_size)
 }
 
@@ -337,7 +347,7 @@ mod test {
 
     #[test]
     fn test_create_top_level() {
-        let mut allocator = BuddyAllocator::<Vec<usize>>::new();
+        let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
         allocator.create_top_level(2usize.pow((MIN_ORDER + MAX_ORDER) as u32));
 
@@ -358,9 +368,9 @@ mod test {
 
     #[test]
     fn split() {
-        let mut allocator = BuddyAllocator::<Vec<usize>>::new();
+        let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         let mut block = allocator.create_top_level(0);
-        BuddyAllocator::<Vec<usize>>::split(&mut block).unwrap();
+        BuddyAllocator::<Vec<*const Block>>::split(&mut block).unwrap();
 
         let expected = vec![
             Block::new(0, MAX_ORDER - 1, false),
@@ -379,7 +389,7 @@ mod test {
 
     #[test]
     fn test_allocate_exact_with_free() {
-        let mut allocator = BuddyAllocator::<Vec<usize>>::new();
+        let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
         let cursor = allocator.allocate_exact(MAX_ORDER).unwrap();
         let expected_block = Block::new(0, MAX_ORDER, true);
@@ -388,7 +398,7 @@ mod test {
 
     #[test]
     fn test_allocate_exact_no_free() {
-        let mut allocator = BuddyAllocator::<Vec<usize>>::new();
+        let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
         let cursor = allocator.allocate_exact(MAX_ORDER - 2).unwrap();
         let expected_block = Block::new(0, MAX_ORDER - 2, true);
@@ -398,20 +408,22 @@ mod test {
 
     #[test]
     fn test_linked_list_remove() {
-        let mut list = SinglyLinkedList::<AddressAdapter>::new(AddressAdapter::new());
-        list.push_front(Box::new(Address::new(1)));
-        list.push_front(Box::new(Address::new(2)));
-        list.push_front(Box::new(Address::new(3)));
-        list.push_front(Box::new(Address::new(4)));
-        list.push_front(Box::new(Address::new(5)));
-        list.remove(2).unwrap();
+        let mut list = SinglyLinkedList::<BlockPtrAdapter>::new(BlockPtrAdapter::new());
+        list.push_front(Box::new(BlockPtr::new(1 as *const _)));
+        list.push_front(Box::new(BlockPtr::new(2 as *const _)));
+        list.push_front(Box::new(BlockPtr::new(3 as *const _)));
+        list.push_front(Box::new(BlockPtr::new(4 as *const _)));
+        list.push_front(Box::new(BlockPtr::new(5 as *const _)));
+        list.remove(2 as *const _).unwrap();
 
-        assert_eq!(list.iter().map(|i| i.address).collect::<Vec<usize>>(), vec![5, 4, 3, 1]);
+        assert_eq!(
+            list.iter().map(|i| i.ptr).collect::<Vec<*const Block>>(),
+            vec![5 as *const _, 4 as *const _, 3 as *const _, 1 as *const _]);
     }
 
     #[test]
     fn test_unique_addresses_vecs() {
-        let mut allocator = BuddyAllocator::<Vec<usize>>::new();
+        let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
 
         for block_number in 0..top_level_blocks(1000, 0) {
             allocator.create_top_level(
@@ -434,7 +446,7 @@ mod test {
 
     #[test]
     fn test_unique_addresses_linked_lists() {
-        let mut allocator = BuddyAllocator::<SinglyLinkedList<AddressAdapter>>::new();
+        let mut allocator = BuddyAllocator::<SinglyLinkedList<BlockPtrAdapter>>::new();
 
         for block_number in 0..top_level_blocks(1000, 0) {
             allocator.create_top_level(
