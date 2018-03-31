@@ -1,9 +1,7 @@
-use std;
 use array_init;
 use std::collections::LinkedList;
 use std::vec::Vec;
-use std::marker::PhantomData;
-use super::{PhysicalAllocator, PageSize, ORDERS, MAX_ORDER, MIN_ORDER};
+use super::{PhysicalAllocator, PageSize, ORDERS, MAX_ORDER, MIN_ORDER, top_level_blocks};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Block {
@@ -19,37 +17,26 @@ pub enum BlockState {
     Free,
 }
 
-pub trait BlockList<'a> {
-    type Iter: Iterator<Item = &'a Block>;
-    type IterMut: Iterator<Item = &'a mut Block>;
-
+pub trait BlockList {
     fn push(&mut self, item: Block);
-    fn iter(&self) -> Self::Iter;
-    fn iter_mut(&mut self) -> Self::IterMut;
+    fn position<P: FnMut(&Block) -> bool>(&mut self, pred: P) -> Option<usize>;
     fn len(&self) -> usize;
     fn get(&self, index: usize) -> Option<&Block>;
     fn get_mut(&mut self, index: usize) -> Option<&mut Block>;
     fn remove(&mut self, index: usize);
 }
 
-impl<'a> BlockList<'a> for LinkedList<Block> {
-    type Iter = std::collections::linked_list::Iter<'a, Block>;
-    type IterMut = std::collections::linked_list::IterMut<'a, Block>;
-
+impl BlockList for LinkedList<Block> {
     fn push(&mut self, item: Block) {
         self.push_back(item)
     }
 
-    fn iter(&self) -> Self::Iter {
-        LinkedList::iter(self)
-    }
-
-    fn iter_mut(&mut self) -> Self::IterMut {
-        LinkedList::iter_mut(self)
-    }
-
     fn len(&self) -> usize {
         LinkedList::len(self)
+    }
+
+    fn position<P: FnMut(&Block) -> bool>(&mut self, pred: P) -> Option<usize> {
+        self.iter().position(pred)
     }
 
     fn get(&self, index: usize) -> Option<&Block> {
@@ -84,20 +71,13 @@ impl<'a> BlockList<'a> for LinkedList<Block> {
     }
 }
 
-impl<'a> BlockList<'a> for Vec<Block> {
-    type Iter = std::slice::Iter<'a, Block>;
-    type IterMut = std::slice::IterMut<'a, Block>;
-
+impl BlockList for Vec<Block> {
     fn push(&mut self, item: Block) {
         Vec::push(self, item);
     }
 
-    fn iter(&self) -> Self::Iter {
-        <[Block]>::iter(&*self)
-    }
-
-    fn iter_mut(&mut self) -> Self::IterMut {
-        <[Block]>::iter_mut(&mut *self)
+    fn position<P: FnMut(&Block) -> bool>(&mut self, pred: P) -> Option<usize> {
+        self.iter().position(pred)
     }
 
     fn len(&self) -> usize {
@@ -124,8 +104,7 @@ impl<'a> BlockList<'a> for Vec<Block> {
     }
 }
 
-pub struct BuddyAllocator<'a, L: BlockList<'a>> {
-    _phantom: PhantomData<&'a ()>,
+pub struct BuddyAllocator<L: BlockList> {
     lists: [L; ORDERS as usize],
 }
 
@@ -137,25 +116,19 @@ struct BlockIndex {
     index: usize,
 }
 
-impl<'a> BuddyAllocator<'a, LinkedList<Block>> {
+impl BuddyAllocator<LinkedList<Block>> {
     pub fn new() -> Self {
-        BuddyAllocator {
-            _phantom: PhantomData,
-            lists: array_init::array_init(|_| LinkedList::new()),
-        }
+        BuddyAllocator { lists: array_init::array_init(|_| LinkedList::new()) }
     }
 }
 
-impl<'a> BuddyAllocator<'a, Vec<Block>> {
+impl BuddyAllocator<Vec<Block>> {
     pub fn new() -> Self {
-        BuddyAllocator {
-            _phantom: PhantomData,
-            lists: array_init::array_init(|_| Vec::new()),
-        }
+        BuddyAllocator { lists: array_init::array_init(|_| Vec::new()) }
     }
 }
 
-impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
+impl<L: BlockList> BuddyAllocator<L> {
     /// Get a block by its index.
     ///
     /// # Panicking
@@ -211,7 +184,7 @@ impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
             panic!("Attempted to split used block at index {:?}", index);
         }
 
-        assert_eq!(
+        debug_assert_eq!(
             block.order,
             index.order,
             "Index should have order equal to block!"
@@ -252,29 +225,34 @@ impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
     }
 
     fn allocate_exact(&mut self, order: u8) -> Result<BlockIndex, BlockAllocateError> {
+        if order > MAX_ORDER {
+            return Err(BlockAllocateError::OrderTooLarge(order));
+        }
+
         let mut index = self.find_or_split(order)?;
+
         self.modify(&mut index, BlockState::Used);
         Ok(index)
     }
 
     /// Find a frame of a given order or splits other frames recursively until one is made. Does not
     /// set state to used.
+    ///
+    /// # Panicking
+    ///
+    /// Panics if the order is greater than max or if a programming error is encountered such as
+    /// attempting to split a block of the smallest possible size.
     fn find_or_split(&mut self, order: u8) -> Result<BlockIndex, BlockAllocateError> {
         if order > MAX_ORDER {
-            return Err(BlockAllocateError::OrderTooLarge {
-                max: MAX_ORDER,
-                received: order,
-            });
+            panic!("Order {} larger than max of {}!", order, MAX_ORDER);
         }
 
-        let opt: Option<Result<BlockIndex, BlockAllocateError>> = self.lists[order as usize]
-            .iter()
+        let opt: Option<BlockIndex> = self.lists[order as usize]
             .position(|block| block.state == BlockState::Free)
-            .map(|index| BlockIndex { order, index })
-            .map(Ok);
+            .map(|index| BlockIndex { order, index });
 
         let block = match opt {
-            Some(thing) => thing,
+            Some(thing) => Ok(thing),
             None => {
                 if order >= MAX_ORDER {
                     Err(BlockAllocateError::NoBlocksAvailable)
@@ -290,18 +268,18 @@ impl<'a, L: BlockList<'a>> BuddyAllocator<'a, L> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum BlockSplitError {
     BlockSmallestPossible,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum BlockAllocateError {
-    OrderTooLarge { max: u8, received: u8 },
     NoBlocksAvailable,
+    OrderTooLarge(u8),
 }
 
-impl<'a, L: BlockList<'a>> PhysicalAllocator for BuddyAllocator<'a, L> {
+impl<L: BlockList> PhysicalAllocator for BuddyAllocator<L> {
     fn alloc(&mut self, size: PageSize) -> *const u8 {
         let index = self.allocate_exact(size.power_of_two() - MIN_ORDER)
             .unwrap();
@@ -324,8 +302,8 @@ pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) {
     demo(allocator, print_addresses, blocks, block_size)
 }
 
-fn demo<'a, L: BlockList<'a>>(
-    mut allocator: BuddyAllocator<'a, L>,
+fn demo<'a, L: BlockList>(
+    mut allocator: BuddyAllocator<L>,
     print_addresses: bool,
     blocks: u32,
     block_size: u8,
@@ -346,13 +324,6 @@ fn demo<'a, L: BlockList<'a>>(
             println!("Address: {:#x}", addr);
         }
     }
-}
-
-fn top_level_blocks(blocks: u32, block_size: u8) -> u64 {
-    let a = 2f64.powi((block_size + MIN_ORDER) as i32) * blocks as f64 /
-        2f64.powi((MAX_ORDER + MIN_ORDER) as i32);
-
-    a.ceil() as u64
 }
 
 #[cfg(test)]
@@ -418,7 +389,7 @@ mod test {
     fn test_get_linked_list() {
         let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(1024 * 1024 * 1024);
+        allocator.create_top_level(2usize.pow((MAX_ORDER + MIN_ORDER) as u32) as usize);
 
         let mut indices: [BlockIndex; 2] = array_init::array_init(|_| {
             allocator
@@ -511,6 +482,51 @@ mod test {
         };
 
         assert_eq!(*allocator.get(&index).unwrap(), expected_block);
+    }
+
+    #[test]
+    fn test_unique_addresses_linked_lists() {
+        let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
+
+        for block_number in 0..top_level_blocks(1000, 0) {
+            allocator.create_top_level(
+                2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+            );
+        }
+        let mut seen = Vec::with_capacity(1000);
+        for _ in 0..1000 {
+            let index = allocator.allocate_exact(0).unwrap();
+            let addr = allocator.get(&index).unwrap().begin_address;
+
+            if seen.contains(&addr) {
+                panic!("Allocator must return addresses never been allocated before!");
+            } else {
+                seen.push(addr);
+            }
+        }
+    }
+
+    #[test]
+    fn test_unique_addresses_vecs() {
+        let mut allocator = BuddyAllocator::<Vec<Block>>::new();
+
+        for block_number in 0..top_level_blocks(1000, 0) {
+            allocator.create_top_level(
+                2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+            );
+        }
+
+        let mut seen = Vec::with_capacity(1000);
+        for _ in 0..1000 {
+            let index = allocator.allocate_exact(0).unwrap();
+            let addr = allocator.get(&index).unwrap().begin_address;
+
+            if seen.contains(&addr) {
+                panic!("Allocator must return addresses never been allocated before!");
+            } else {
+                seen.push(addr);
+            }
+        }
     }
 
     // TODO test allocate_exact failing case propagates error right

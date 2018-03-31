@@ -4,6 +4,7 @@
 #![feature(slice_patterns)]
 #![feature(custom_attribute)]
 #![feature(duration_extras)]
+#![feature(arbitrary_self_types)]
 
 #![plugin(phf_macros)]
 
@@ -17,8 +18,12 @@ extern crate phf;
 extern crate failure;
 #[macro_use]
 extern crate static_assertions;
+#[macro_use]
+extern crate intrusive_collections;
+extern crate bit_field;
 
 mod buddy_allocator_lists;
+mod buddy_allocator_tree;
 
 use std::time::Instant;
 use structopt::StructOpt;
@@ -42,9 +47,16 @@ const_assert!(__min_order_less_or_eq_than_4kib; MIN_ORDER <= 12);
 static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
     "linked_lists" => buddy_allocator_lists::demo_linked_lists,
     "vecs" => buddy_allocator_lists::demo_vecs,
+    "rb_tree_vecs" => buddy_allocator_tree::demo_vecs,
+    "rb_tree_linked_lists" => buddy_allocator_tree::demo_linked_lists,
 };
 
-const DEFAULT_DEMOS: &'static [&'static str] = &["vecs", "linked_lists"];
+const DEFAULT_DEMOS: &'static [&'static str] = &[
+    "vecs",
+    "linked_lists",
+    "rb_tree_vecs",
+    "rb_tree_linked_lists",
+];
 
 trait PhysicalAllocator {
     fn alloc(&mut self, size: PageSize) -> *const u8;
@@ -69,13 +81,22 @@ impl PageSize {
     }
 }
 
+pub fn top_level_blocks(blocks: u32, block_size: u8) -> u64 {
+    let a = 2f64.powi((block_size + MIN_ORDER) as i32) * blocks as f64 /
+        2f64.powi((MAX_ORDER + MIN_ORDER) as i32);
+
+    a.ceil() as u64
+}
+
 #[derive(StructOpt, Debug)]
 #[structopt(name = "buddy_allocator_workshop")]
 struct Options {
-    /// Print the addresses of the blocks allocated
+    /// Print the addresses of blocks as they are allocated. This will slow down performance, and as
+    /// such should not be used for benchmarking.
     #[structopt(short = "p", long = "print-addresses")]
     print_addresses: bool,
-    /// Which demos to run. Defaults to all demos. Accepted values: `vecs`, `linked_lists`
+    /// Which demos to run. Defaults to all demos. Accepted values: `vecs`, `linked_lists`,
+    /// `rb_tree_vecs`, `rb_tree_linked_lists`.
     #[structopt(short = "d", long = "demos")]
     demos: Vec<String>,
     /// How many blocks to demo allocate. Defaults to 100 000
