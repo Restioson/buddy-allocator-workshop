@@ -1,3 +1,4 @@
+use bit_field::BitField;
 use std::cell::Cell;
 use std::cmp::{Ord, PartialOrd, Eq, PartialEq, Ordering};
 use array_init;
@@ -8,16 +9,41 @@ use super::{MIN_ORDER, MAX_ORDER, ORDERS, top_level_blocks};
 #[derive(Debug)]
 pub struct Block {
     link: RBTreeLink,
-    begin_address: usize,
-    order: u8,
-    state: Cell<BlockState>,
+    bit_field: Cell<u64>,
 }
 
 impl Block {
-    /// Set the state of this block. Unsafe because the caller could not really have unique access
-    /// to the block.
-    unsafe fn set_state(&self, state: BlockState) {
-        self.state.set(state)
+    fn new(begin_address: usize, order: u8, used: bool) -> Self {
+        let mut bit_field = 0u64;
+        bit_field.set_bit(0, used);
+        bit_field.set_bits(1..8, order as u64);
+        bit_field.set_bits(8..64, begin_address as u64);
+
+        Block {
+            link: RBTreeLink::new(),
+            bit_field: Cell::new(bit_field),
+        }
+    }
+
+    fn used(&self) -> bool {
+        self.bit_field.get().get_bit(0)
+    }
+
+    /// Set the state of this block. Unsafe because the caller could not have unique access to the
+    /// block. Needed to mutate the block while it is in the tree
+    unsafe fn set_used(&self, used: bool) {
+        let mut copy = self.bit_field.get();
+        copy.set_bit(0, used);
+
+        self.bit_field.set(copy)
+    }
+
+    fn order(&self) -> u8 {
+        self.bit_field.get().get_bits(1..8) as u8 // 7 bits for max = 64
+    }
+
+    fn address(&self) -> usize {
+        self.bit_field.get().get_bits(8..64) as usize // max physical memory = 2^56 - 1 bytes
     }
 }
 
@@ -26,46 +52,37 @@ intrusive_adapter!(BlockAdapter = Box<Block>: Block { link: RBTreeLink });
 impl<'a> KeyAdapter<'a> for BlockAdapter {
     type Key = usize;
     fn get_key(&self, block: &'a Block) -> usize {
-        block.begin_address
+        block.address()
     }
 }
 
 impl PartialOrd for Block {
     fn partial_cmp(&self, other: &Block) -> Option<Ordering> {
-        self.begin_address.partial_cmp(&other.begin_address)
+        self.address().partial_cmp(&other.address())
     }
 }
 
 impl Ord for Block {
     fn cmp(&self, other: &Block) -> Ordering {
-        self.begin_address.cmp(&other.begin_address)
+        self.address().cmp(&other.address())
     }
 }
 
 impl PartialEq for Block {
     fn eq(&self, other: &Block) -> bool {
-        let properties_eq = self.order == other.order && self.state.get() == other.state.get();
-        let address_eq = self.begin_address == other.begin_address;
+        let properties_eq = self.order() == other.order() && self.used() == other.used();
+        let address_eq = self.address() == other.address();
 
         // Addresses can't be the same without properties being the same
-        debug_assert_eq!(
-            properties_eq && address_eq,
-            address_eq,
-            "Addresses can't be the same without properties being the same!"
-        );
+        if cfg!(debug_assertions) && address_eq == true && !properties_eq {
+            panic!("Addresses can't be the same without properties being the same!");
+        }
 
-        properties_eq && self.begin_address == other.begin_address
+        properties_eq && address_eq
     }
 }
 
 impl Eq for Block {}
-
-#[repr(u8)]
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum BlockState {
-    Used,
-    Free,
-}
 
 #[derive(Debug)]
 pub struct BuddyAllocator<L: FreeList> {
@@ -161,12 +178,9 @@ impl BuddyAllocator<SinglyLinkedList<AddressAdapter>> {
 impl<L: FreeList> BuddyAllocator<L> {
     fn create_top_level(&mut self, begin_address: usize) -> CursorMut<BlockAdapter> {
         self.free[MAX_ORDER as usize].push(begin_address);
-        self.tree.insert(Box::new(Block {
-            link: RBTreeLink::new(),
-            begin_address,
-            order: MAX_ORDER,
-            state: Cell::new(BlockState::Free),
-        }))
+        self.tree.insert(Box::new(
+            Block::new(begin_address, MAX_ORDER, false),
+        ))
     }
 
     /// Splits a block in place, returning the addresses of the two blocks split. Does not add them
@@ -179,34 +193,33 @@ impl<L: FreeList> BuddyAllocator<L> {
     fn split(cursor: &mut CursorMut<BlockAdapter>) -> Result<[usize; 2], BlockSplitError> {
         let block = cursor.get().unwrap();
 
-        if block.state.get() == BlockState::Used {
+        if block.used() == true {
             panic!("Attempted to split used block {:?}!", block);
         }
 
-        let original_order = block.order;
+        let original_order = block.order();
         let order = original_order - 1;
 
-        if block.order == 0 {
+        if block.order() == 0 {
             return Err(BlockSplitError::BlockSmallestPossible);
         }
 
         let buddies: [Block; 2] = array_init::array_init(|n| {
-            let block = Block {
-                link: RBTreeLink::new(),
-                begin_address: if n == 0 {
-                    block.begin_address
+            let block = Block::new(
+                if n == 0 {
+                    block.address()
                 } else {
-                    block.begin_address + 2usize.pow((order + MIN_ORDER) as u32)
+                    block.address() + 2usize.pow((order + MIN_ORDER) as u32)
                 },
                 order,
-                state: Cell::new(BlockState::Free),
-            };
+                false,
+            );
 
             block
         });
 
         let [first, second] = buddies;
-        let addrs = [first.begin_address, second.begin_address];
+        let addrs = [first.address(), second.address()];
 
         cursor.replace_with(Box::new(first)).unwrap();
         cursor.insert_after(Box::new(second));
@@ -242,7 +255,7 @@ impl<L: FreeList> BuddyAllocator<L> {
 
 
                 // Split block and remove it from the free list
-                let old_address = cursor.get().unwrap().begin_address;
+                let old_address = cursor.get().unwrap().address();
                 let addresses = Self::split(&mut cursor).unwrap();
                 free[order as usize + 1].remove(old_address);
 
@@ -264,10 +277,10 @@ impl<L: FreeList> BuddyAllocator<L> {
 
         // Safe because we have exclusive access to `block`.
         unsafe {
-            block.get().unwrap().set_state(BlockState::Used);
+            block.get().unwrap().set_used(true);
         }
 
-        let address = block.get().unwrap().begin_address;
+        let address = block.get().unwrap().address();
         self.free[order as usize].remove(address);
 
         Ok(block)
@@ -310,22 +323,15 @@ fn demo<'a, L: FreeList>(
         );
     }
 
-    for _ in 0..(blocks - 1) {
+    for _ in 0..blocks {
         let cursor = allocator.allocate_exact(block_size).unwrap();
-        let addr = cursor.get().unwrap().begin_address;
+        let addr = cursor.get().unwrap().address();
 
         if print_addresses {
             println!("Address: {:#x}", addr);
         }
     }
-
-    let cursor = allocator.allocate_exact(block_size).unwrap();
-    let addr = cursor.get().unwrap().begin_address;
-
-    println!("last addr {}", addr);
 }
-
-
 
 #[cfg(test)]
 mod test {
@@ -338,18 +344,12 @@ mod test {
         allocator.create_top_level(2usize.pow((MIN_ORDER + MAX_ORDER) as u32));
 
         let expected = vec![
-            Block {
-                link: RBTreeLink::new(), // Irrelevant
-                begin_address: 0,
-                order: MAX_ORDER,
-                state: Cell::new(BlockState::Free),
-            },
-            Block {
-                link: RBTreeLink::new(),
-                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32),
-                order: MAX_ORDER,
-                state: Cell::new(BlockState::Free),
-            },
+            Block::new(0, MAX_ORDER, false),
+            Block::new(
+                2usize.pow((MIN_ORDER + MAX_ORDER) as u32),
+                MAX_ORDER,
+                false,
+            ),
         ];
 
         assert_eq!(
@@ -365,18 +365,12 @@ mod test {
         BuddyAllocator::<Vec<usize>>::split(&mut block).unwrap();
 
         let expected = vec![
-            Block {
-                link: RBTreeLink::new(), // Irrelevant
-                begin_address: 0,
-                order: MAX_ORDER - 1,
-                state: Cell::new(BlockState::Free),
-            },
-            Block {
-                link: RBTreeLink::new(),
-                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32),
-                order: MAX_ORDER - 1,
-                state: Cell::new(BlockState::Free),
-            },
+            Block::new(0, MAX_ORDER - 1, false),
+            Block::new(
+                2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32),
+                MAX_ORDER - 1,
+                false,
+            ),
         ];
 
         assert_eq!(
@@ -390,12 +384,7 @@ mod test {
         let mut allocator = BuddyAllocator::<Vec<usize>>::new();
         allocator.create_top_level(0);
         let cursor = allocator.allocate_exact(MAX_ORDER).unwrap();
-        let expected_block = Block {
-            link: RBTreeLink::new(),
-            begin_address: 0,
-            order: MAX_ORDER,
-            state: Cell::new(BlockState::Used),
-        };
+        let expected_block = Block::new(0, MAX_ORDER, true);
         assert_eq!(*cursor.get().unwrap(), expected_block);
     }
 
@@ -404,12 +393,7 @@ mod test {
         let mut allocator = BuddyAllocator::<Vec<usize>>::new();
         allocator.create_top_level(0);
         let cursor = allocator.allocate_exact(MAX_ORDER - 2).unwrap();
-        let expected_block = Block {
-            link: RBTreeLink::new(),
-            begin_address: 0,
-            order: MAX_ORDER - 2,
-            state: Cell::new(BlockState::Used),
-        };
+        let expected_block = Block::new(0, MAX_ORDER - 2, true);
 
         assert_eq!(*cursor.get().unwrap(), expected_block);
     }
@@ -440,7 +424,7 @@ mod test {
         let mut seen = Vec::with_capacity(1000);
         for _ in 0..1000 {
             let cursor = allocator.allocate_exact(0).unwrap();
-            let addr = cursor.get().unwrap().begin_address;
+            let addr = cursor.get().unwrap().address();
 
             if seen.contains(&addr) {
                 panic!("Allocator must return addresses never been allocated before!");
@@ -463,7 +447,7 @@ mod test {
         let mut seen = Vec::with_capacity(1000);
         for _ in 0..1000 {
             let cursor = allocator.allocate_exact(0).unwrap();
-            let addr = cursor.get().unwrap().begin_address;
+            let addr = cursor.get().unwrap().address();
 
             if seen.contains(&addr) {
                 panic!("Allocator must return addresses never been allocated before!");
@@ -471,5 +455,18 @@ mod test {
                 seen.push(addr);
             }
         }
+    }
+
+
+    #[test]
+    fn test_block_bitfields() {
+        let block = Block::new(2usize.pow(56) - 1,64, false);
+
+        assert!(!block.used());
+        assert_eq!(block.order(), 64);
+        assert_eq!(block.address(), 2usize.pow(56) - 1);
+
+        unsafe { block.set_used(true) };
+        assert!(block.used());
     }
 }
