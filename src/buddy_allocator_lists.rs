@@ -199,17 +199,15 @@ impl<L: BlockList> BuddyAllocator<L> {
         }
 
         let buddies: [Block; 2] = array_init::array_init(|n| {
-            let block = Block {
+            Block {
                 begin_address: if n == 0 {
                     block.begin_address
                 } else {
-                    block.begin_address + 2usize.pow((order + MIN_ORDER) as u32)
+                    block.begin_address + 2usize.pow(u32::from(order + MIN_ORDER))
                 },
                 order,
                 state: BlockState::Free,
-            };
-
-            block
+            }
         });
 
         self.lists[original_order as usize].remove(index.index);
@@ -302,7 +300,7 @@ pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) {
     demo(allocator, print_addresses, blocks, block_size)
 }
 
-fn demo<'a, L: BlockList>(
+fn demo<L: BlockList>(
     mut allocator: BuddyAllocator<L>,
     print_addresses: bool,
     blocks: u32,
@@ -312,7 +310,7 @@ fn demo<'a, L: BlockList>(
 
     for block_number in 0..top_level_blocks {
         allocator.create_top_level(
-            2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+            2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize,
         );
     }
 

@@ -51,7 +51,7 @@ static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
     "rb_tree_linked_lists" => buddy_allocator_tree::demo_linked_lists,
 };
 
-const DEFAULT_DEMOS: &'static [&'static str] = &[
+const DEFAULT_DEMOS: &[&str] = &[
     "vecs",
     "linked_lists",
     "rb_tree_vecs",
@@ -82,8 +82,8 @@ impl PageSize {
 }
 
 pub fn top_level_blocks(blocks: u32, block_size: u8) -> u64 {
-    let a = 2f64.powi((block_size + MIN_ORDER) as i32) * blocks as f64 /
-        2f64.powi((MAX_ORDER + MIN_ORDER) as i32);
+    let a = 2f64.powi(i32::from(block_size + MIN_ORDER)) * f64::from(blocks) /
+        2f64.powi(i32::from(MAX_ORDER + MIN_ORDER));
 
     a.ceil() as u64
 }
@@ -192,6 +192,6 @@ fn run_demo(demo: fn(bool, u32, u8), print_addresses: bool, blocks: u32, order: 
     println!(
         "Finished {} demo in {}s",
         name.replace('_', " "),
-        time_taken.as_secs() as f64 + time_taken.subsec_nanos() as f64 / NANOS_PER_SEC,
+        time_taken.as_secs() as f64 + f64::from(time_taken.subsec_nanos()) / NANOS_PER_SEC,
     );
 }

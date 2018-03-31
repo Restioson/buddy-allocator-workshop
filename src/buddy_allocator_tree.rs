@@ -16,7 +16,7 @@ impl Block {
     fn new(begin_address: usize, order: u8, used: bool) -> Self {
         let mut bit_field = 0u64;
         bit_field.set_bit(0, used);
-        bit_field.set_bits(1..8, order as u64);
+        bit_field.set_bits(1..8, u64::from(order));
         bit_field.set_bits(8..64, begin_address as u64);
 
         Block {
@@ -74,7 +74,7 @@ impl PartialEq for Block {
         let address_eq = self.address() == other.address();
 
         // Addresses can't be the same without properties being the same
-        if cfg!(debug_assertions) && address_eq == true && !properties_eq {
+        if cfg!(debug_assertions) && address_eq && !properties_eq {
             panic!("Addresses can't be the same without properties being the same!");
         }
 
@@ -193,7 +193,7 @@ impl<L: FreeList> BuddyAllocator<L> {
     fn split(cursor: &mut CursorMut<BlockAdapter>) -> Result<[usize; 2], BlockSplitError> {
         let block = cursor.get().unwrap();
 
-        if block.used() == true {
+        if block.used() {
             panic!("Attempted to split used block {:?}!", block);
         }
 
@@ -205,17 +205,15 @@ impl<L: FreeList> BuddyAllocator<L> {
         }
 
         let buddies: [Block; 2] = array_init::array_init(|n| {
-            let block = Block::new(
+            Block::new(
                 if n == 0 {
                     block.address()
                 } else {
-                    block.address() + 2usize.pow((order + MIN_ORDER) as u32)
+                    block.address() + 2usize.pow(u32::from(order + MIN_ORDER))
                 },
                 order,
                 false,
-            );
-
-            block
+            )
         });
 
         let [first, second] = buddies;
@@ -309,7 +307,7 @@ pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
 }
 
 
-fn demo<'a, L: FreeList>(
+fn demo<L: FreeList>(
     mut allocator: BuddyAllocator<L>,
     print_addresses: bool,
     blocks: u32,
@@ -319,7 +317,7 @@ fn demo<'a, L: FreeList>(
 
     for block_number in 0..top_level_blocks {
         allocator.create_top_level(
-            2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+            2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize,
         );
     }
 
