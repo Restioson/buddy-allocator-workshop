@@ -43,6 +43,13 @@ benchmarks to add (possibly more scientific ones), please see
 | RB Trees - Vectors            | ~0.3s | ~3.33 GiB/s     |
 | RB Trees - Singly Linked Lists| ~0.5s | ~2 GiB/s        |
 
+**Note:** The throughput is extrapolated from the time it took to
+allocate 1 GiB in 4kib blocks. For implementations that have complexity
+>O(log n) (such as the naive list based implementation), this will not
+be accurate -- the throughput will slow down as more blocks are
+allocated. This should be accurate for ones that have a complexity
+of O(log n) or less though.
+
 ## Naive List Based Implementation
 
 This implementation keeps a list per order of block. It is generic over
