@@ -7,6 +7,8 @@
 #![feature(arbitrary_self_types)]
 
 #![plugin(phf_macros)]
+#![cfg_attr(feature="flame_profile", feature(plugin, custom_attribute))]
+#![cfg_attr(feature="flame_profile", plugin(flamer))]
 
 #![allow(unused_attributes)]
 
@@ -21,6 +23,8 @@ extern crate static_assertions;
 #[macro_use]
 extern crate intrusive_collections;
 extern crate bit_field;
+#[cfg(feature="flame_profile")]
+extern crate flame;
 
 mod buddy_allocator_lists;
 mod buddy_allocator_tree;
@@ -161,7 +165,9 @@ fn main() {
         .into_iter()
         .for_each(|(demo, name)| {
             run_demo(*demo, print_addresses, blocks, order, name)
-        })
+        });
+
+    flame_dump();
 }
 
 trait ResultExt<T> {
@@ -195,3 +201,12 @@ fn run_demo(demo: fn(bool, u32, u8), print_addresses: bool, blocks: u32, order: 
         time_taken.as_secs() as f64 + f64::from(time_taken.subsec_nanos()) / NANOS_PER_SEC,
     );
 }
+
+#[cfg(feature = "flame_profile")]
+fn flame_dump() {
+    use std::fs::File;
+    flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
+}
+
+#[cfg(not(feature = "flame_profile"))]
+fn flame_dump() {}

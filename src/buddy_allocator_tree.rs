@@ -1,3 +1,5 @@
+#[cfg(feature="flame_profile")]
+use flame;
 use bit_field::BitField;
 use std::cell::Cell;
 use std::cmp::{Ord, PartialOrd, Eq, PartialEq, Ordering};
@@ -25,12 +27,14 @@ impl Block {
         }
     }
 
+    #[inline]
     fn used(&self) -> bool {
         self.bit_field.get().get_bit(0)
     }
 
     /// Set the state of this block. Unsafe because the caller could not have unique access to the
     /// block. Needed to mutate the block while it is in the tree
+    #[inline]
     unsafe fn set_used(&self, used: bool) {
         let mut copy = self.bit_field.get();
         copy.set_bit(0, used);
@@ -38,10 +42,12 @@ impl Block {
         self.bit_field.set(copy)
     }
 
+    #[inline]
     fn order(&self) -> u8 {
         self.bit_field.get().get_bits(1..8) as u8 // 7 bits for max = 64
     }
 
+    #[inline]
     fn address(&self) -> usize {
         self.bit_field.get().get_bits(8..64) as usize // max physical memory = 2^56 - 1 bytes
     }
@@ -190,7 +196,10 @@ impl<L: FreeList> BuddyAllocator<L> {
     ///
     /// 1. Index incorrect and points null block (this is a programming error)
     /// 2. Attempt to split used block (this is also a programming error)
+    #[cfg_attr(feature="flame_profile", flame)]
     fn split(cursor: &mut CursorMut<BlockAdapter>) -> Result<[usize; 2], BlockSplitError> {
+        #[cfg(feature="flame_profile")]
+        flame::note("split", None);
         let block = cursor.get().unwrap();
 
         if block.used() {
@@ -233,11 +242,15 @@ impl<L: FreeList> BuddyAllocator<L> {
     ///
     /// Panics if the order is greater than max or if a programming error is encountered such as
     /// attempting to split a block of the smallest possible size.
+    #[cfg_attr(feature="flame_profile", flame)]
     fn find_or_split<'a>(
         free: &mut [L; 19],
         tree: &'a mut RBTree<BlockAdapter>,
         order: u8,
     ) -> Result<CursorMut<'a, BlockAdapter>, BlockAllocateError> {
+        #[cfg(feature="flame_profile")]
+        flame::note("find_or_split", None);
+
         if order > MAX_ORDER {
             panic!("Order {} larger than max of {}!", order, MAX_ORDER);
         }
@@ -266,10 +279,14 @@ impl<L: FreeList> BuddyAllocator<L> {
         }
     }
 
+    #[cfg_attr(feature="flame_profile", flame)]
     fn allocate_exact(&mut self, order: u8) -> Result<CursorMut<BlockAdapter>, BlockAllocateError> {
         if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge(order));
         }
+
+        #[cfg(feature="flame_profile")]
+        flame::note("allocate begin", None);
 
         let block = BuddyAllocator::find_or_split(&mut self.free, &mut self.tree, order)?;
 

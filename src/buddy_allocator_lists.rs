@@ -1,3 +1,5 @@
+#[cfg(feature="flame_profile")]
+use flame;
 use array_init;
 use std::collections::LinkedList;
 use std::vec::Vec;
@@ -222,10 +224,14 @@ impl<L: BlockList> BuddyAllocator<L> {
         })
     }
 
+    #[cfg_attr(feature="flame_profile", flame)]
     fn allocate_exact(&mut self, order: u8) -> Result<BlockIndex, BlockAllocateError> {
         if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge(order));
         }
+
+        #[cfg(feature="flame_profile")]
+        flame::note("allocate begin", None);
 
         let mut index = self.find_or_split(order)?;
 
