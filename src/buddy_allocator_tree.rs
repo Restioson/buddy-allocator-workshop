@@ -1,3 +1,4 @@
+use test::{Bencher, black_box};
 #[cfg(feature="flame_profile")]
 use flame;
 use bit_field::BitField;
@@ -192,7 +193,7 @@ impl<L: FreeList> BuddyAllocator<L> {
     }
 
     /// Splits a block in place, returning the addresses of the two blocks split. Does not add them
-    /// to the free list, or remove the original.
+    /// to the free list, or remove the original. The cursor will point to the first block.
     ///
     /// # Panicking
     ///
@@ -229,19 +230,19 @@ impl<L: FreeList> BuddyAllocator<L> {
 
         let [first, second] = buddies;
 
-        cursor.replace_with(Box::new(first)).unwrap();
-        cursor.insert_after(Box::new(second));
+        // Reuse the old box
+        let mut old = cursor.remove().unwrap();
+        *old = first;
+        cursor.insert_before(old);
+        cursor.insert_before(Box::new(second));
 
+        // Reversed pointers
         let ptrs: [*const _; 2] = array_init::array_init(|i| {
-            if i == 1 {
-                cursor.move_next();
-            }
+            cursor.move_prev();
             cursor.get().unwrap() as *const _
         });
 
-        cursor.move_prev();
-
-        Ok(ptrs)
+        Ok([ptrs[1], ptrs[0]])
     }
 
 
@@ -495,5 +496,14 @@ mod test {
 
         unsafe { block.set_used(true) };
         assert!(block.used());
+    }
+
+    #[bench]
+    fn bench_allocate(b: &mut Bencher) {
+        b.iter(|| {
+            let blocks = black_box(100_000);
+            let allocator = BuddyAllocator::<Vec<*const Block>>::new();
+            demo(allocator, false, blocks, 0);
+        });
     }
 }

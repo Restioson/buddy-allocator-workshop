@@ -5,6 +5,7 @@
 #![feature(custom_attribute)]
 #![feature(duration_extras)]
 #![feature(arbitrary_self_types)]
+#![feature(test)]
 
 #![plugin(phf_macros)]
 #![cfg_attr(feature="flame_profile", feature(plugin, custom_attribute))]
@@ -12,6 +13,7 @@
 
 #![allow(unused_attributes)]
 
+extern crate test;
 #[macro_use]
 extern crate structopt;
 extern crate array_init;
