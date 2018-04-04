@@ -8,7 +8,7 @@ use std::cmp::{Ord, PartialOrd, Eq, PartialEq, Ordering};
 use array_init;
 use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter, SinglyLinkedList, SinglyLinkedListLink};
 use intrusive_collections::rbtree::CursorMut;
-use super::{MIN_ORDER, MAX_ORDER, ORDERS, top_level_blocks};
+use super::{MIN_ORDER, MAX_ORDER, ORDERS, top_level_blocks, PhysicalAllocator};
 
 #[derive(Debug)]
 pub struct Block {
@@ -131,7 +131,7 @@ impl BlockPtr {
     fn new(ptr: *const Block) -> BlockPtr {
         BlockPtr {
             link: SinglyLinkedListLink::new(),
-            ptr
+            ptr,
         }
     }
 }
@@ -183,7 +183,8 @@ impl BuddyAllocator<SinglyLinkedList<BlockPtrAdapter>> {
     }
 }
 
-impl<L: FreeList> BuddyAllocator<L> {
+// Remove debug TODO
+impl<L: FreeList + ::std::fmt::Debug> BuddyAllocator<L> {
     fn create_top_level(&mut self, begin_address: usize) -> CursorMut<BlockAdapter> {
         let cursor = self.tree.insert(Box::new(
             Block::new(begin_address, MAX_ORDER, false),
@@ -194,6 +195,8 @@ impl<L: FreeList> BuddyAllocator<L> {
 
     /// Splits a block in place, returning the addresses of the two blocks split. Does not add them
     /// to the free list, or remove the original. The cursor will point to the first block.
+    ///
+    /// **NB: The caller *must* remove the original from the free list!**
     ///
     /// # Panicking
     ///
@@ -237,7 +240,7 @@ impl<L: FreeList> BuddyAllocator<L> {
         cursor.insert_before(Box::new(second));
 
         // Reversed pointers
-        let ptrs: [*const _; 2] = array_init::array_init(|i| {
+        let ptrs: [*const _; 2] = array_init::array_init(|_| {
             cursor.move_prev();
             cursor.get().unwrap() as *const _
         });
@@ -246,8 +249,8 @@ impl<L: FreeList> BuddyAllocator<L> {
     }
 
 
-    /// Find a frame of a given order or splits other frames recursively until one is made and then
-    /// returns a cursor pointing to it. Does not set state to used.
+    /// Find a free block of a given order or splits other frames recursively until one is made and
+    /// then returns a cursor pointing to it.
     ///
     /// # Panicking
     ///
@@ -255,7 +258,7 @@ impl<L: FreeList> BuddyAllocator<L> {
     /// attempting to split a block of the smallest possible size.
     #[cfg_attr(feature="flame_profile", flame)]
     fn find_or_split<'a>(
-        free: &mut [L; 19],
+        free: &mut [L; ORDERS as usize],
         tree: &'a mut RBTree<BlockAdapter>,
         order: u8,
     ) -> Result<CursorMut<'a, BlockAdapter>, BlockAllocateError> {
@@ -266,48 +269,71 @@ impl<L: FreeList> BuddyAllocator<L> {
             panic!("Order {} larger than max of {}!", order, MAX_ORDER);
         }
 
-        let next_free = free[order as usize].pop();
+        // Find free block of size >= order
+        let mut next_free = None;
 
-        match next_free {
-            Some(ptr) => Ok(unsafe { tree.cursor_mut_from_ptr(ptr) }),
-            None if order == MAX_ORDER => Err(BlockAllocateError::NoBlocksAvailable),
-            None => {
-                let mut cursor = BuddyAllocator::find_or_split(free, tree, order + 1)?;
-                debug_assert!(!cursor.is_null(), "Find or split must return a valid pointer!");
-
-
-                // Split block and remove it from the free list
-                let old_ptr = cursor.get().unwrap() as *const _;
-                let ptrs = Self::split(&mut cursor).unwrap();
-                free[order as usize + 1].remove(old_ptr);
-
-                // Push split blocks to free list
-                free[order as usize].push(ptrs[0]);
-                free[order as usize].push(ptrs[1]);
-
-                Ok(cursor)
+        for i in order..ORDERS {
+            if let Some(free) = free[i as usize].pop() {
+                next_free = Some((free, i));
+                break;
             }
         }
+
+        // TODO
+        if let None = next_free {
+            panic!("free: {:#?}, 0: {:#?}, tree: {:#?}", free, free[0], tree);
+        }
+
+        // Destructure
+        let next_free = next_free.ok_or(BlockAllocateError::NoBlocksAvailable)?;
+        let (ptr, i) = next_free;
+        let mut cursor = unsafe { tree.cursor_mut_from_ptr(ptr) };
+        debug_assert!(!cursor.get().unwrap().used(), "Cursor from free list should be free!");
+
+        // Split i - order times and add to free list where needed
+        for n in 0..(i - order) {
+
+            // Remove the block we're about to split from the free list
+            let old_ptr = cursor.get().unwrap();
+            let old_order = cursor.get().unwrap().order() as usize;
+
+            // First one is already popped (`next_free`)
+            if n != 0 {
+                free[old_order].remove(old_ptr as *const _).unwrap();
+            }
+
+            // Split and add the newly split blocks to the free list
+            let ptrs = Self::split(&mut cursor).unwrap();
+            let split_order = old_order - 1;
+            free[split_order].push(ptrs[1]);
+            // TODO
+            debug_assert_ne!(cursor.get().unwrap() as *const _, ptrs[1]);
+
+            // If last split then don't push first to free list since it will be returned
+            if n != (i - order - 1) {
+                free[split_order].push(ptrs[0])
+            }
+        }
+
+        // Safe because we have exclusive access to the block
+        unsafe {
+            cursor.get().unwrap().set_used(true);
+        }
+
+
+        Ok(cursor)
     }
 
     #[cfg_attr(feature="flame_profile", flame)]
     fn allocate_exact(&mut self, order: u8) -> Result<CursorMut<BlockAdapter>, BlockAllocateError> {
+        #[cfg(feature="flame_profile")]
+        flame::note("allocate exact", None);
+
         if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge(order));
         }
 
-        #[cfg(feature="flame_profile")]
-        flame::note("allocate begin", None);
-
-        let block = BuddyAllocator::find_or_split(&mut self.free, &mut self.tree, order)?;
-
-        // Safe because we have exclusive access to `block`.
-        unsafe {
-            block.get().unwrap().set_used(true);
-        }
-
-        let ptr = block.get().unwrap() as *const _ ;
-        self.free[order as usize].remove(ptr);
+        let block = Self::find_or_split(&mut self.free, &mut self.tree, order)?;
 
         Ok(block)
     }
@@ -335,7 +361,8 @@ pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
 }
 
 
-fn demo<L: FreeList>(
+// TODO
+fn demo<L: FreeList + ::std::fmt::Debug>(
     mut allocator: BuddyAllocator<L>,
     print_addresses: bool,
     blocks: u32,
@@ -406,7 +433,7 @@ mod test {
     }
 
     #[test]
-    fn test_allocate_exact_with_free() {
+    fn test_allocate_exact_with_exact_free() {
         let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
         let cursor = allocator.allocate_exact(MAX_ORDER).unwrap();
@@ -415,7 +442,7 @@ mod test {
     }
 
     #[test]
-    fn test_allocate_exact_no_free() {
+    fn test_allocate_exact_no_exact_free() {
         let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
         let cursor = allocator.allocate_exact(MAX_ORDER - 2).unwrap();
@@ -488,7 +515,7 @@ mod test {
 
     #[test]
     fn test_block_bitfields() {
-        let block = Block::new(2usize.pow(56) - 1,64, false);
+        let block = Block::new(2usize.pow(56) - 1, 64, false);
 
         assert!(!block.used());
         assert_eq!(block.order(), 64);
