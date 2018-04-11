@@ -19,5 +19,12 @@ flamer = { version = "^0.2.0", optional = true }
 default = []
 flame_profile = ["flame", "flamer"]
 
+[dev-dependencies]
+criterion = "0.2"
+
+[[bench]]
+name = "rb_tree"
+harness = false
+
 [profile.release]
 debug = true

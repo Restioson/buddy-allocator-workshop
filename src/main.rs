@@ -1,53 +1,25 @@
-#![feature(plugin)]
-#![feature(const_fn)]
-#![feature(nll)]
-#![feature(slice_patterns)]
 #![feature(custom_attribute)]
-#![feature(duration_extras)]
-#![feature(arbitrary_self_types)]
-#![feature(test)]
+#![feature(plugin)]
+#![feature(nll)]
 
 #![plugin(phf_macros)]
-#![cfg_attr(feature="flame_profile", feature(plugin, custom_attribute))]
 #![cfg_attr(feature="flame_profile", plugin(flamer))]
-
 #![allow(unused_attributes)]
 
-extern crate test;
+extern crate buddy_allocator_workshop;
+
 #[macro_use]
 extern crate structopt;
-extern crate array_init;
 extern crate phf;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate static_assertions;
-#[macro_use]
-extern crate intrusive_collections;
-extern crate bit_field;
 #[cfg(feature="flame_profile")]
 extern crate flame;
+#[macro_use]
+extern crate failure;
 
-mod buddy_allocator_lists;
-mod buddy_allocator_tree;
-
+use buddy_allocator_workshop::*;
 use std::time::Instant;
 use structopt::StructOpt;
 use failure::Fail;
-
-/// Number of orders. **This constant is OK to modify for configuration.**
-const ORDERS: u8 = 19;
-/// The maximum order. **This constant is not Ok to modify for configuration.**
-const MAX_ORDER: u8 = ORDERS - 1;
-/// The minimum order. All orders are in context of this -- i.e the size of a block of order `k` is
-/// `2^(k + MIN_ORDER)`, not `2^k`. **This constant is OK to modify for configuration.**
-///
-/// # Note
-///
-/// **NB: Must be greater than log base 2 of 4096.** This is so that 4kib pages can always be
-/// allocated, regardless of min order.
-const MIN_ORDER: u8 = 12;
-const_assert!(__min_order_less_or_eq_than_4kib; MIN_ORDER <= 12);
 
 #[rustfmt_skip] // Puts phf_map! with same indentation level as the key => value
 static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
@@ -63,36 +35,6 @@ const DEFAULT_DEMOS: &[&str] = &[
     "rb_tree_vecs",
     "rb_tree_linked_lists",
 ];
-
-trait PhysicalAllocator {
-    fn alloc(&mut self, size: PageSize) -> *const u8;
-    fn dealloc(&mut self, addr: *const u8);
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum PageSize {
-    Kib4,
-    Mib2,
-    Gib1,
-}
-
-impl PageSize {
-    fn power_of_two(self) -> u8 {
-        use self::PageSize::*;
-        match self {
-            Kib4 => 12,
-            Mib2 => 21,
-            Gib1 => 30,
-        }
-    }
-}
-
-pub fn top_level_blocks(blocks: u32, block_size: u8) -> u64 {
-    let a = 2f64.powi(i32::from(block_size + MIN_ORDER)) * f64::from(blocks) /
-        2f64.powi(i32::from(MAX_ORDER + MIN_ORDER));
-
-    a.ceil() as u64
-}
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "buddy_allocator_workshop")]

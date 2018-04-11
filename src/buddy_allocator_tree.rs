@@ -55,7 +55,7 @@ impl Block {
     }
 }
 
-intrusive_adapter!(BlockAdapter = Box<Block>: Block { link: RBTreeLink });
+intrusive_adapter!(pub BlockAdapter = Box<Block>: Block { link: RBTreeLink });
 
 impl<'a> KeyAdapter<'a> for BlockAdapter {
     type Key = usize;
@@ -121,7 +121,7 @@ impl FreeList for Vec<*const Block> {
 }
 
 #[derive(Debug)]
-struct BlockPtr {
+pub struct BlockPtr {
     link: SinglyLinkedListLink,
     ptr: *const Block,
 }
@@ -136,7 +136,7 @@ impl BlockPtr {
     }
 }
 
-intrusive_adapter!(BlockPtrAdapter = Box<BlockPtr>: BlockPtr { link: SinglyLinkedListLink });
+intrusive_adapter!(pub BlockPtrAdapter = Box<BlockPtr>: BlockPtr { link: SinglyLinkedListLink });
 
 impl FreeList for SinglyLinkedList<BlockPtrAdapter> {
     fn push(&mut self, block: *const Block) {
@@ -166,7 +166,7 @@ impl FreeList for SinglyLinkedList<BlockPtrAdapter> {
 }
 
 impl BuddyAllocator<Vec<*const Block>> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         BuddyAllocator {
             tree: RBTree::new(BlockAdapter::new()),
             free: array_init::array_init(|_| Vec::new()),
@@ -175,7 +175,7 @@ impl BuddyAllocator<Vec<*const Block>> {
 }
 
 impl BuddyAllocator<SinglyLinkedList<BlockPtrAdapter>> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         BuddyAllocator {
             tree: RBTree::new(BlockAdapter::new()),
             free: array_init::array_init(|_| SinglyLinkedList::new(BlockPtrAdapter::new())),
@@ -184,7 +184,7 @@ impl BuddyAllocator<SinglyLinkedList<BlockPtrAdapter>> {
 }
 
 impl<L: FreeList> BuddyAllocator<L> {
-    fn create_top_level(&mut self, begin_address: usize) -> CursorMut<BlockAdapter> {
+    pub fn create_top_level(&mut self, begin_address: usize) -> CursorMut<BlockAdapter> {
         let cursor = self.tree.insert(Box::new(
             Block::new(begin_address, MAX_ORDER, false),
         ));
@@ -237,7 +237,7 @@ impl<L: FreeList> BuddyAllocator<L> {
         cursor.insert_before(Box::new(second));
 
         // Reversed pointers
-        let ptrs: [*const _; 2] = array_init::array_init(|i| {
+        let ptrs: [*const _; 2] = array_init::array_init(|_| {
             cursor.move_prev();
             cursor.get().unwrap() as *const _
         });
@@ -266,6 +266,7 @@ impl<L: FreeList> BuddyAllocator<L> {
             panic!("Order {} larger than max of {}!", order, MAX_ORDER);
         }
 
+        // Find free block of size >= order
         let next_free = free[order as usize].pop();
 
         match next_free {
@@ -274,7 +275,6 @@ impl<L: FreeList> BuddyAllocator<L> {
             None => {
                 let mut cursor = BuddyAllocator::find_or_split(free, tree, order + 1)?;
                 debug_assert!(!cursor.is_null(), "Find or split must return a valid pointer!");
-
 
                 // Split block and remove it from the free list
                 let old_ptr = cursor.get().unwrap() as *const _;
@@ -291,7 +291,10 @@ impl<L: FreeList> BuddyAllocator<L> {
     }
 
     #[cfg_attr(feature="flame_profile", flame)]
-    fn allocate_exact(&mut self, order: u8) -> Result<CursorMut<BlockAdapter>, BlockAllocateError> {
+    pub fn allocate_exact(&mut self, order: u8) -> Result<CursorMut<BlockAdapter>, BlockAllocateError> {
+        #[cfg(feature="flame_profile")]
+        flame::note("allocate exact", None);
+
         if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge(order));
         }
