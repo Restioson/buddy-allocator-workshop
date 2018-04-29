@@ -15,6 +15,9 @@ bit_field = "0.9.0"
 flame = { version = "0.2.0", optional = true }
 flamer = { version = "^0.2.0", optional = true }
 
+[dependencies.flat-tree]
+git = "https://github.com/Restioson/flat-tree"
+
 [features]
 default = []
 flame_profile = ["flame", "flamer"]
@@ -24,6 +27,10 @@ criterion = "0.2"
 
 [[bench]]
 name = "rb_tree"
+harness = false
+
+[[bench]]
+name = "bitmap"
 harness = false
 
 [profile.release]

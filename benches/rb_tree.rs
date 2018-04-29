@@ -34,5 +34,6 @@ fn rb_tree_vecs(c: &mut Criterion) {
     );
 }
 
+
 criterion_group!(benches, rb_tree_vecs);
 criterion_main!(benches);

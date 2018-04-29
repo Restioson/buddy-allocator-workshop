@@ -500,13 +500,4 @@ mod test {
         unsafe { block.set_used(true) };
         assert!(block.used());
     }
-
-    #[bench]
-    fn bench_allocate(b: &mut Bencher) {
-        b.iter(|| {
-            let blocks = black_box(100_000);
-            let allocator = BuddyAllocator::<Vec<*const Block>>::new();
-            demo(allocator, false, blocks, 0);
-        });
-    }
 }

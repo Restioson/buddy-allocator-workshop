@@ -4,6 +4,7 @@
 #![feature(duration_extras)]
 #![feature(arbitrary_self_types)]
 #![feature(test)]
+#![feature(integer_atomics)]
 
 #![cfg_attr(feature="flame_profile", plugin(flamer))]
 
@@ -16,9 +17,11 @@ extern crate intrusive_collections;
 extern crate bit_field;
 #[cfg(feature="flame_profile")]
 extern crate flame;
+extern crate flat_tree;
 
 pub mod buddy_allocator_lists;
 pub mod buddy_allocator_tree;
+pub mod buddy_allocator_bitmap;
 
 /// Number of orders. **This constant is OK to modify for configuration.**
 pub const ORDERS: u8 = 19;
