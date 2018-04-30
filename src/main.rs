@@ -1,25 +1,24 @@
 #![feature(custom_attribute)]
 #![feature(plugin)]
 #![feature(nll)]
-
 #![plugin(phf_macros)]
-#![cfg_attr(feature="flame_profile", plugin(flamer))]
+#![cfg_attr(feature = "flame_profile", plugin(flamer))]
 #![allow(unused_attributes)]
 
 extern crate buddy_allocator_workshop;
 
 #[macro_use]
 extern crate structopt;
-extern crate phf;
-#[cfg(feature="flame_profile")]
+#[cfg(feature = "flame_profile")]
 extern crate flame;
+extern crate phf;
 #[macro_use]
 extern crate failure;
 
 use buddy_allocator_workshop::*;
+use failure::Fail;
 use std::time::Instant;
 use structopt::StructOpt;
-use failure::Fail;
 
 #[rustfmt_skip] // Puts phf_map! with same indentation level as the key => value
 static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
@@ -27,6 +26,7 @@ static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
     "vecs" => buddy_allocator_lists::demo_vecs,
     "rb_tree_vecs" => buddy_allocator_tree::demo_vecs,
     "rb_tree_linked_lists" => buddy_allocator_tree::demo_linked_lists,
+    "bitmap" => buddy_allocator_bitmap::demo,
 };
 
 const DEFAULT_DEMOS: &[&str] = &[
@@ -34,6 +34,7 @@ const DEFAULT_DEMOS: &[&str] = &[
     "linked_lists",
     "rb_tree_vecs",
     "rb_tree_linked_lists",
+    "bitmap",
 ];
 
 #[derive(StructOpt, Debug)]

@@ -1,9 +1,9 @@
-#[cfg(feature="flame_profile")]
-use flame;
+use super::{top_level_blocks, PageSize, PhysicalAllocator, MAX_ORDER, MIN_ORDER, ORDERS};
 use array_init;
+#[cfg(feature = "flame_profile")]
+use flame;
 use std::collections::LinkedList;
 use std::vec::Vec;
-use super::{PhysicalAllocator, PageSize, ORDERS, MAX_ORDER, MIN_ORDER, top_level_blocks};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Block {
@@ -120,13 +120,17 @@ struct BlockIndex {
 
 impl BuddyAllocator<LinkedList<Block>> {
     pub fn new() -> Self {
-        BuddyAllocator { lists: array_init::array_init(|_| LinkedList::new()) }
+        BuddyAllocator {
+            lists: array_init::array_init(|_| LinkedList::new()),
+        }
     }
 }
 
 impl BuddyAllocator<Vec<Block>> {
     pub fn new() -> Self {
-        BuddyAllocator { lists: array_init::array_init(|_| Vec::new()) }
+        BuddyAllocator {
+            lists: array_init::array_init(|_| Vec::new()),
+        }
     }
 }
 
@@ -150,7 +154,6 @@ impl<L: BlockList> BuddyAllocator<L> {
         let list = &mut self.lists[block.order as usize];
         list.get_mut(block.index)
     }
-
 
     /// Modify a block by setting its state to a new one. This will not merge blocks if set to free,
     /// it will just mark the block as freed.
@@ -187,11 +190,9 @@ impl<L: BlockList> BuddyAllocator<L> {
         }
 
         debug_assert_eq!(
-            block.order,
-            index.order,
+            block.order, index.order,
             "Index should have order equal to block!"
         );
-
 
         let original_order = block.order;
         let order = original_order - 1;
@@ -200,16 +201,14 @@ impl<L: BlockList> BuddyAllocator<L> {
             return Err(BlockSplitError::BlockSmallestPossible);
         }
 
-        let buddies: [Block; 2] = array_init::array_init(|n| {
-            Block {
-                begin_address: if n == 0 {
-                    block.begin_address
-                } else {
-                    block.begin_address + 2usize.pow(u32::from(order + MIN_ORDER))
-                },
-                order,
-                state: BlockState::Free,
-            }
+        let buddies: [Block; 2] = array_init::array_init(|n| Block {
+            begin_address: if n == 0 {
+                block.begin_address
+            } else {
+                block.begin_address + 2usize.pow(u32::from(order + MIN_ORDER))
+            },
+            order,
+            state: BlockState::Free,
         });
 
         self.lists[original_order as usize].remove(index.index);
@@ -224,13 +223,13 @@ impl<L: BlockList> BuddyAllocator<L> {
         })
     }
 
-    #[cfg_attr(feature="flame_profile", flame)]
+    #[cfg_attr(feature = "flame_profile", flame)]
     fn allocate_exact(&mut self, order: u8) -> Result<BlockIndex, BlockAllocateError> {
         if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge(order));
         }
 
-        #[cfg(feature="flame_profile")]
+        #[cfg(feature = "flame_profile")]
         flame::note("allocate begin", None);
 
         let mut index = self.find_or_split(order)?;
@@ -315,9 +314,8 @@ fn demo<L: BlockList>(
     let top_level_blocks = top_level_blocks(blocks, block_size);
 
     for block_number in 0..top_level_blocks {
-        allocator.create_top_level(
-            2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize,
-        );
+        allocator
+            .create_top_level(2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize);
     }
 
     for _ in 0..blocks {

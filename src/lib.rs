@@ -5,23 +5,25 @@
 #![feature(arbitrary_self_types)]
 #![feature(test)]
 #![feature(integer_atomics)]
+#![feature(box_syntax)]
+#![feature(custom_attribute)]
+#![feature(plugin)]
+#![cfg_attr(feature = "flame_profile", plugin(flamer))]
 
-#![cfg_attr(feature="flame_profile", plugin(flamer))]
-
-extern crate test;
 extern crate array_init;
+extern crate test;
 #[macro_use]
 extern crate static_assertions;
 #[macro_use]
 extern crate intrusive_collections;
 extern crate bit_field;
-#[cfg(feature="flame_profile")]
+#[cfg(feature = "flame_profile")]
 extern crate flame;
 extern crate flat_tree;
 
+pub mod buddy_allocator_bitmap;
 pub mod buddy_allocator_lists;
 pub mod buddy_allocator_tree;
-pub mod buddy_allocator_bitmap;
 
 /// Number of orders. **This constant is OK to modify for configuration.**
 pub const ORDERS: u8 = 19;
@@ -36,7 +38,6 @@ pub const MAX_ORDER: u8 = ORDERS - 1;
 /// allocated, regardless of min order.
 pub const MIN_ORDER: u8 = 12;
 const_assert!(__min_order_less_or_eq_than_4kib; MIN_ORDER <= 12);
-
 
 trait PhysicalAllocator {
     fn alloc(&mut self, size: PageSize) -> *const u8;
@@ -62,8 +63,8 @@ impl PageSize {
 }
 
 pub fn top_level_blocks(blocks: u32, block_size: u8) -> u64 {
-    let a = 2f64.powi(i32::from(block_size + MIN_ORDER)) * f64::from(blocks) /
-        2f64.powi(i32::from(MAX_ORDER + MIN_ORDER));
+    let a = 2f64.powi(i32::from(block_size + MIN_ORDER)) * f64::from(blocks)
+        / 2f64.powi(i32::from(MAX_ORDER + MIN_ORDER));
 
     a.ceil() as u64
 }

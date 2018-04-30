@@ -1,14 +1,13 @@
-use test::{Bencher, black_box};
-#[cfg(feature="flame_profile")]
-use flame;
-use bit_field::BitField;
-use std::cell::Cell;
-use std::ptr;
-use std::cmp::{Ord, PartialOrd, Eq, PartialEq, Ordering};
+use super::{top_level_blocks, MAX_ORDER, MIN_ORDER, ORDERS};
 use array_init;
-use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter, SinglyLinkedList, SinglyLinkedListLink};
+use bit_field::BitField;
+#[cfg(feature = "flame_profile")]
+use flame;
 use intrusive_collections::rbtree::CursorMut;
-use super::{MIN_ORDER, MAX_ORDER, ORDERS, top_level_blocks};
+use intrusive_collections::{KeyAdapter, RBTree, RBTreeLink, SinglyLinkedList, SinglyLinkedListLink};
+use std::cell::Cell;
+use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
+use std::ptr;
 
 #[derive(Debug)]
 pub struct Block {
@@ -131,7 +130,7 @@ impl BlockPtr {
     fn new(ptr: *const Block) -> BlockPtr {
         BlockPtr {
             link: SinglyLinkedListLink::new(),
-            ptr
+            ptr,
         }
     }
 }
@@ -185,9 +184,8 @@ impl BuddyAllocator<SinglyLinkedList<BlockPtrAdapter>> {
 
 impl<L: FreeList> BuddyAllocator<L> {
     pub fn create_top_level(&mut self, begin_address: usize) -> CursorMut<BlockAdapter> {
-        let cursor = self.tree.insert(Box::new(
-            Block::new(begin_address, MAX_ORDER, false),
-        ));
+        let cursor = self.tree
+            .insert(Box::new(Block::new(begin_address, MAX_ORDER, false)));
         self.free[MAX_ORDER as usize].push(cursor.get().unwrap() as *const _);
         cursor
     }
@@ -199,10 +197,10 @@ impl<L: FreeList> BuddyAllocator<L> {
     ///
     /// 1. Index incorrect and points null block (this is a programming error)
     /// 2. Attempt to split used block (this is also a programming error)
-    #[cfg_attr(feature="flame_profile", flame)]
+    #[cfg_attr(feature = "flame_profile", flame)]
     fn split(cursor: &mut CursorMut<BlockAdapter>) -> Result<[*const Block; 2], BlockSplitError> {
-        #[cfg(feature="flame_profile")]
-            flame::note("split", None);
+        #[cfg(feature = "flame_profile")]
+        flame::note("split", None);
         let block = cursor.get().unwrap();
 
         if block.used() {
@@ -245,7 +243,6 @@ impl<L: FreeList> BuddyAllocator<L> {
         Ok([ptrs[1], ptrs[0]])
     }
 
-
     /// Find a frame of a given order or splits other frames recursively until one is made and then
     /// returns a cursor pointing to it. Does not set state to used.
     ///
@@ -253,13 +250,13 @@ impl<L: FreeList> BuddyAllocator<L> {
     ///
     /// Panics if the order is greater than max or if a programming error is encountered such as
     /// attempting to split a block of the smallest possible size.
-    #[cfg_attr(feature="flame_profile", flame)]
+    #[cfg_attr(feature = "flame_profile", flame)]
     fn find_or_split<'a>(
         free: &mut [L; 19],
         tree: &'a mut RBTree<BlockAdapter>,
         order: u8,
     ) -> Result<CursorMut<'a, BlockAdapter>, BlockAllocateError> {
-        #[cfg(feature="flame_profile")]
+        #[cfg(feature = "flame_profile")]
         flame::note("find_or_split", None);
 
         if order > MAX_ORDER {
@@ -274,7 +271,10 @@ impl<L: FreeList> BuddyAllocator<L> {
             None if order == MAX_ORDER => Err(BlockAllocateError::NoBlocksAvailable),
             None => {
                 let mut cursor = BuddyAllocator::find_or_split(free, tree, order + 1)?;
-                debug_assert!(!cursor.is_null(), "Find or split must return a valid pointer!");
+                debug_assert!(
+                    !cursor.is_null(),
+                    "Find or split must return a valid pointer!"
+                );
 
                 // Split block and remove it from the free list
                 let old_ptr = cursor.get().unwrap() as *const _;
@@ -290,16 +290,19 @@ impl<L: FreeList> BuddyAllocator<L> {
         }
     }
 
-    #[cfg_attr(feature="flame_profile", flame)]
-    pub fn allocate_exact(&mut self, order: u8) -> Result<CursorMut<BlockAdapter>, BlockAllocateError> {
-        #[cfg(feature="flame_profile")]
+    #[cfg_attr(feature = "flame_profile", flame)]
+    pub fn allocate_exact(
+        &mut self,
+        order: u8,
+    ) -> Result<CursorMut<BlockAdapter>, BlockAllocateError> {
+        #[cfg(feature = "flame_profile")]
         flame::note("allocate exact", None);
 
         if order > MAX_ORDER {
             return Err(BlockAllocateError::OrderTooLarge(order));
         }
 
-        #[cfg(feature="flame_profile")]
+        #[cfg(feature = "flame_profile")]
         flame::note("allocate begin", None);
 
         let block = BuddyAllocator::find_or_split(&mut self.free, &mut self.tree, order)?;
@@ -309,7 +312,7 @@ impl<L: FreeList> BuddyAllocator<L> {
             block.get().unwrap().set_used(true);
         }
 
-        let ptr = block.get().unwrap() as *const _ ;
+        let ptr = block.get().unwrap() as *const _;
         self.free[order as usize].remove(ptr);
 
         Ok(block)
@@ -337,7 +340,6 @@ pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
     demo(allocator, print_addresses, blocks, block_size)
 }
 
-
 fn demo<L: FreeList>(
     mut allocator: BuddyAllocator<L>,
     print_addresses: bool,
@@ -347,9 +349,8 @@ fn demo<L: FreeList>(
     let top_level_blocks = top_level_blocks(blocks, block_size);
 
     for block_number in 0..top_level_blocks {
-        allocator.create_top_level(
-            2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize,
-        );
+        allocator
+            .create_top_level(2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize);
     }
 
     for _ in 0..blocks {
@@ -374,15 +375,15 @@ mod test {
 
         let expected = vec![
             Block::new(0, MAX_ORDER, false),
-            Block::new(
-                2usize.pow((MIN_ORDER + MAX_ORDER) as u32),
-                MAX_ORDER,
-                false,
-            ),
+            Block::new(2usize.pow((MIN_ORDER + MAX_ORDER) as u32), MAX_ORDER, false),
         ];
 
         assert_eq!(
-            allocator.tree.into_iter().map(|b| *b).collect::<Vec<Block>>(),
+            allocator
+                .tree
+                .into_iter()
+                .map(|b| *b)
+                .collect::<Vec<Block>>(),
             expected
         );
     }
@@ -403,7 +404,11 @@ mod test {
         ];
 
         assert_eq!(
-            allocator.tree.into_iter().map(|b| *b).collect::<Vec<Block>>(),
+            allocator
+                .tree
+                .into_iter()
+                .map(|b| *b)
+                .collect::<Vec<Block>>(),
             expected
         );
     }
@@ -439,7 +444,8 @@ mod test {
 
         assert_eq!(
             list.iter().map(|i| i.ptr).collect::<Vec<*const Block>>(),
-            vec![5 as *const _, 4 as *const _, 3 as *const _, 1 as *const _]);
+            vec![5 as *const _, 4 as *const _, 3 as *const _, 1 as *const _]
+        );
     }
 
     #[test]
@@ -488,10 +494,9 @@ mod test {
         }
     }
 
-
     #[test]
     fn test_block_bitfields() {
-        let block = Block::new(2usize.pow(56) - 1,64, false);
+        let block = Block::new(2usize.pow(56) - 1, 64, false);
 
         assert!(!block.used());
         assert_eq!(block.order(), 64);
