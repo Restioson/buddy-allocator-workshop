@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate criterion;
+extern crate array_init;
 extern crate buddy_allocator_workshop;
 
 use criterion::Criterion;
@@ -8,10 +9,10 @@ fn bitmap(c: &mut Criterion) {
     use buddy_allocator_workshop::buddy_allocator_bitmap::*;
     use buddy_allocator_workshop::{MAX_ORDER, MIN_ORDER};
 
-    c.bench_function("bitmap allocate_exact", |b| {
-        let mut trees = vec![Tree::new(), Tree::new(), Tree::new()];
-        let mut current_tree = 0;
+    let mut trees: [Tree; 64] = array_init::array_init(|_| Tree::new());
+    let mut current_tree = 0;
 
+    c.bench_function("bitmap allocate_exact", move |b| {
         b.iter(|| {
             match trees[current_tree].alloc_exact(0) {
                 Some(_) => (),
