@@ -1,6 +1,4 @@
 ///! A modified buddy bitmap allocator
-#[cfg(feature = "flame_profile")]
-use flame;
 use std::cmp;
 use std::mem;
 use super::{MAX_ORDER, MIN_ORDER, ORDERS};
@@ -50,18 +48,17 @@ impl Tree {
     }
 
     #[inline]
-    fn block_mut(&mut self, index: usize) -> &mut Block {
-        unsafe { self.flat_blocks.get_unchecked_mut(index) }
+    unsafe fn block_mut(&mut self, index: usize) -> &mut Block {
+        self.flat_blocks.get_unchecked_mut(index)
     }
 
     #[inline]
-    fn block(&self, index: usize) -> &Block {
-        unsafe { self.flat_blocks.get_unchecked(index) }
+    unsafe fn block(&self, index: usize) -> &Block {
+        self.flat_blocks.get_unchecked(index)
     }
 
-    #[cfg_attr(feature = "flame_profile", flame)]
     pub fn alloc_exact(&mut self, desired_order: u8) -> Option<*const u8> {
-        let root = &mut self.block_mut(0);
+        let root = unsafe { &mut self.block_mut(0) };
 
         // If the root node has no orders free, or if it does not have the desired order free
         if root.order_free == 0 || (root.order_free + 1) < desired_order {
@@ -72,14 +69,9 @@ impl Tree {
         let mut index = 1;
 
         for level in 0..(MAX_ORDER - desired_order) {
-            #[cfg(feature = "flame_profile")]
-            let _loop_guard = flame::start_guard("tree_traverse_loop");
-
             let left_child_index = flat_tree::left_child(index);
-            let left_child = self.block(left_child_index - 1);
+            let left_child = unsafe { self.block(left_child_index - 1) };
 
-            #[cfg(feature = "flame_profile")]
-            let _update_guard = flame::start_guard("tree_traverse_update");
             index = match left_child.order_free {
                 o if o != 0 && o >= desired_order => left_child_index,
                 _ => {
@@ -89,43 +81,20 @@ impl Tree {
             };
         }
 
-        let block = self.block_mut(index - 1);
+        let block = unsafe { self.block_mut(index - 1) };
         block.order_free = 0;
 
         // Iterate upwards and set parents accordingly
         for _ in 0..(MAX_ORDER - desired_order) {
-            #[cfg(feature = "flame_profile")]
-            let traverse_guard = flame::start_guard("traverse_up");
-
             index = flat_tree::parent(index);
-
-            #[cfg(feature = "flame_profile")]
-            traverse_guard.end();
-
-            #[cfg(feature = "flame_profile")]
-            let neighbour_guard = flame::start_guard("get_neighbours");
-
-            #[cfg(feature = "flame_profile")]
-            let compute_left_index_guard = flame::start_guard("compute_left_index");
 
             // Treat as right index because we need to be 0 indexed here!
             let right_index = flat_tree::left_child(index);
 
-            #[cfg(feature = "flame_profile")]
-            compute_left_index_guard.end();
+            let left = unsafe { self.block(right_index - 1) }.order_free;
+            let right = unsafe { self.block(right_index) }.order_free;
 
-            let left = self.block(right_index - 1).order_free;
-            let right = self.block(right_index).order_free;
-
-            #[cfg(feature = "flame_profile")]
-            neighbour_guard.end();
-
-            #[cfg(feature = "flame_profile")]
-            let parents_guard = flame::start_guard("update_parents");
-            self.block_mut(index - 1).order_free = cmp::max(left, right);
-
-            #[cfg(feature = "flame_profile")]
-            parents_guard.end();
+            unsafe { self.block_mut(index - 1) }.order_free = cmp::max(left, right);
         }
 
         Some(addr as *const u8)
