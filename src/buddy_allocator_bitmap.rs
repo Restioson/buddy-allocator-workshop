@@ -68,7 +68,9 @@ impl Tree {
         let mut addr = 0;
         let mut index = 1;
 
-        for level in 0..(MAX_ORDER - desired_order) {
+        let max_level = MAX_ORDER - desired_order;
+
+        for level in 0..max_level {
             let left_child_index = flat_tree::left_child(index);
             let left_child = unsafe { self.block(left_child_index - 1) };
 
@@ -85,7 +87,7 @@ impl Tree {
         block.order_free = 0;
 
         // Iterate upwards and set parents accordingly
-        for _ in 0..(MAX_ORDER - desired_order) {
+        for _ in 0..max_level {
             index = flat_tree::parent(index);
 
             // Treat as right index because we need to be 0 indexed here!
