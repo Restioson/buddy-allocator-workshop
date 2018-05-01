@@ -128,15 +128,18 @@ fn raise<F: Fail>(failure: F) -> ! {
 
 fn run_demo(demo: fn(bool, u32, u8), print_addresses: bool, blocks: u32, order: u8, name: String) {
     const NANOS_PER_SEC: f64 = 1_000_000_000.0; // Taken from std::time::Duration because las
+    const RUN_COUNT: usize = 8;
 
     println!("Running {} demo...", name);
     let begin = Instant::now();
-    demo(print_addresses, blocks, order);
+    for _ in 0..RUN_COUNT {
+        demo(print_addresses, blocks, order);
+    }
     let time_taken = Instant::now().duration_since(begin);
     println!(
         "Finished {} demo in {}s",
         name.replace('_', " "),
-        time_taken.as_secs() as f64 + f64::from(time_taken.subsec_nanos()) / NANOS_PER_SEC,
+        (time_taken.as_secs() as f64 + f64::from(time_taken.subsec_nanos()) / NANOS_PER_SEC) / RUN_COUNT as f64,
     );
 }
 
