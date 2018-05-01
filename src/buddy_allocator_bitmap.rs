@@ -1,10 +1,11 @@
 ///! A modified buddy bitmap allocator
 
-use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 #[cfg(feature = "flame_profile")]
 use flame;
 use std::cmp;
 use std::mem;
+
+use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 
 /// A block in the bitmap
 struct Block {
@@ -90,10 +91,12 @@ impl Tree {
 
         for level in 0..(MAX_ORDER - desired_order) {
             #[cfg(feature = "flame_profile")]
-            let _g = flame::start_guard("tree_traverse_loop");
+            let loop_guard = flame::start_guard("tree_traverse_loop");
 
             let left_child = &mut self.flat_blocks[flat_tree::left_child(index) - 1];
 
+            #[cfg(feature = "flame_profile")]
+            let update_guard = flame::start_guard("tree_traverse_update");
             index = match left_child.order_free() {
                 Some(o) if o >= desired_order => flat_tree::left_child(index),
                 _ => {
@@ -109,9 +112,14 @@ impl Tree {
         // Iterate upwards and set parents accordingly
         for _ in 0..(MAX_ORDER - desired_order) {
             #[cfg(feature = "flame_profile")]
-            let _g = flame::start_guard("traverse_up_loop");
+            let traverse_guard = flame::start_guard("traverse_up");
 
             index = flat_tree::parent(index);
+
+            traverse_guard.end();
+
+            #[cfg(feature = "flame_profile")]
+            let neighbour_guard = flame::start_guard("get_neighbours");
 
             let left_index = flat_tree::left_child(index) - 1;
 
@@ -120,11 +128,16 @@ impl Tree {
                 &mut self.flat_blocks[left_index + 1].order_free(),
             );
 
+            neighbour_guard.end();
+
+            #[cfg(feature = "flame_profile")]
+            let parents_guard = flame::start_guard("update_parents");
             if let Some(order) = cmp::max(left, right) {
                 self.flat_blocks[index - 1].set_free(*order);
             } else {
                 self.flat_blocks[index - 1].set_used();
             }
+            parents_guard.end();
         }
 
         Some(addr as *const u8)
@@ -139,18 +152,17 @@ impl Tree {
 mod flat_tree {
     #[inline]
     pub fn left_child(index: usize) -> usize {
-        2 * index
+        index << 1
     }
 
     #[inline]
     pub fn right_child(index: usize) -> usize {
-        2 * index + 1
+        (index << 1) + 1
     }
 
-    /// Gets the parent of an index. Will return 0 if the index is 1
     #[inline]
     pub fn parent(index: usize) -> usize {
-        index / 2
+        index >> 1
     }
 }
 
