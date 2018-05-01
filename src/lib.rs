@@ -19,7 +19,6 @@ extern crate intrusive_collections;
 extern crate bit_field;
 #[cfg(feature = "flame_profile")]
 extern crate flame;
-extern crate flat_tree;
 
 pub mod buddy_allocator_bitmap;
 pub mod buddy_allocator_lists;

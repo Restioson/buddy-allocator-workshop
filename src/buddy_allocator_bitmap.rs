@@ -1,9 +1,9 @@
+///! A modified buddy bitmap allocator
+
 use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 #[cfg(feature = "flame_profile")]
 use flame;
-use flat_tree;
 use std::cmp;
-///! A modified buddy bitmap allocator
 use std::mem;
 
 /// A block in the bitmap
@@ -64,9 +64,10 @@ impl Tree {
         const BLOCKS_IN_TREE: usize = Tree::blocks_in_tree(ORDERS);
         let mut flat_blocks: Box<[Block; BLOCKS_IN_TREE]> = box unsafe { mem::uninitialized() };
 
-        for i in 0..BLOCKS_IN_TREE {
-            let order = flat_tree::depth(i); // TODO
-            flat_blocks[i] = Block::new_free(order as u8);
+        for (i, slot) in flat_blocks.iter_mut().enumerate() {
+            let order = MAX_ORDER as usize - ((i + 1) as f64).log2().floor() as usize;
+
+            *slot = Block::new_free(order as u8);
         }
 
         Tree { flat_blocks }
@@ -74,66 +75,100 @@ impl Tree {
 
     #[cfg_attr(feature = "flame_profile", flame)]
     pub fn alloc_exact(&mut self, desired_order: u8) -> Option<*const u8> {
-        let top = flat_tree::index(MAX_ORDER as usize, 0);
-        let mut index = top;
-
-        let root = &mut self.flat_blocks[index];
+        let root = &mut self.flat_blocks[0];
 
         match root.order_free() {
-            Some(o) if o < desired_order => return None,
+            Some(o) if o < desired_order => {
+                return None;
+            },
             None => return None,
             _ => (),
         };
 
         let mut addr = 0;
+        let mut index = 1;
 
         for level in 0..(MAX_ORDER - desired_order) {
             #[cfg(feature = "flame_profile")]
             let _g = flame::start_guard("tree_traverse_loop");
 
-            let left_child =
-                &mut self.flat_blocks[flat_tree::left_child(index)
-                                          .expect(&format!("{} does not have left child!", index))];
+            let left_child = &mut self.flat_blocks[flat_tree::left_child(index) - 1];
 
             index = match left_child.order_free() {
-                Some(o) if o > desired_order => flat_tree::left_child(index).unwrap(),
+                Some(o) if o >= desired_order => flat_tree::left_child(index),
                 _ => {
                     addr += 1 << ((MAX_ORDER + MIN_ORDER - level - 1) as u32);
-                    flat_tree::right_child(index).unwrap()
+                    flat_tree::right_child(index)
                 }
             };
         }
 
-        let block = &mut self.flat_blocks[index];
+        let block = &mut self.flat_blocks[index - 1];
         block.set_used();
 
         // Iterate upwards and set parents accordingly
-        let mut index = flat_tree::parent(index);
-
-        for _ in 1..(MAX_ORDER) {
+        for _ in 0..(MAX_ORDER - desired_order) {
             #[cfg(feature = "flame_profile")]
             let _g = flame::start_guard("traverse_up_loop");
+
+            index = flat_tree::parent(index).unwrap();
+
             let (left, right) = (
-                &mut self.flat_blocks[flat_tree::left_child(index).unwrap()].order_free(),
-                &mut self.flat_blocks[flat_tree::right_child(index).unwrap()].order_free(),
+                &mut self.flat_blocks[flat_tree::left_child(index) - 1].order_free(),
+                &mut self.flat_blocks[flat_tree::right_child(index) - 1].order_free(),
             );
 
             if let Some(order) = cmp::max(left, right) {
-                self.flat_blocks[index].set_free(*order);
+                self.flat_blocks[index - 1].set_free(*order);
             } else {
-                self.flat_blocks[index].set_used();
+                self.flat_blocks[index - 1].set_used();
             }
-
-            index = flat_tree::parent(index);
         }
 
         Some(addr as *const u8)
     }
 }
 
+
+/// Flat tree things.
+///
+/// # Note
+/// **1 INDEXED!**
+mod flat_tree {
+    #[inline]
+    pub fn left_child(index: usize) -> usize {
+        2 * index
+    }
+
+    #[inline]
+    pub fn right_child(index: usize) -> usize {
+        2 * index + 1
+    }
+
+    #[inline]
+    pub fn parent(index: usize) -> Option<usize> {
+        if index == 1 {
+            None
+        } else {
+            Some(index / 2)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_flat_tree_fns() {
+        use self::flat_tree::*;
+        //    1
+        //  2   3
+        // 4 5 6 7
+        assert_eq!(left_child(1), 2);
+        assert_eq!(right_child(1), 3);
+        assert_eq!(parent(2).unwrap(), 1);
+    }
 
     #[test]
     fn test_blocks_in_tree() {
@@ -144,7 +179,12 @@ mod test {
     #[test]
     fn test_alloc_exact() {
         let mut tree = Tree::new();
-        tree.alloc_exact(0).unwrap();
+        tree.alloc_exact(3).unwrap();
+
+        tree = Tree::new();
+        assert_eq!(tree.alloc_exact(MAX_ORDER - 1).unwrap(), 0x0 as *const u8);
+        assert_eq!(tree.alloc_exact(MAX_ORDER - 1).unwrap(), (1024usize.pow(3) / 2) as *const u8);
+        assert_eq!(tree.alloc_exact(0), None);
     }
 
     #[test]

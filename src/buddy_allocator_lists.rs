@@ -2,6 +2,7 @@ use super::{top_level_blocks, PageSize, PhysicalAllocator, MAX_ORDER, MIN_ORDER,
 use array_init;
 #[cfg(feature = "flame_profile")]
 use flame;
+
 use std::collections::LinkedList;
 use std::vec::Vec;
 
