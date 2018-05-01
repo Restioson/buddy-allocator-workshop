@@ -51,7 +51,7 @@ impl Tree {
 
     #[cfg_attr(feature = "flame_profile", flame)]
     pub fn alloc_exact(&mut self, desired_order: u8) -> Option<*const u8> {
-        let root = &mut self.flat_blocks[0];
+        let root = &mut unsafe { self.flat_blocks.get_unchecked(0) };
 
         if root.order_free == 0 || (root.order_free + 1) < desired_order {
             return None;
@@ -65,7 +65,7 @@ impl Tree {
             let _loop_guard = flame::start_guard("tree_traverse_loop");
 
             let left_child_index = flat_tree::left_child(index);
-            let left_child = &self.flat_blocks[left_child_index - 1];
+            let left_child = unsafe { &self.flat_blocks.get_unchecked(left_child_index - 1) };
 
             #[cfg(feature = "flame_profile")]
             let _update_guard = flame::start_guard("tree_traverse_update");
@@ -78,7 +78,7 @@ impl Tree {
             };
         }
 
-        let block = &mut self.flat_blocks[index - 1];
+        let block = unsafe { self.flat_blocks.get_unchecked_mut(index - 1) };
         block.order_free = 0;
 
         // Iterate upwards and set parents accordingly
@@ -102,17 +102,19 @@ impl Tree {
             #[cfg(feature = "flame_profile")]
             compute_left_index_guard.end();
 
-            let (left, right) = (
-                self.flat_blocks[left_index].order_free,
-                self.flat_blocks[left_index + 1].order_free,
-            );
+            let (left, right) = unsafe {
+                (
+                    self.flat_blocks.get_unchecked(left_index).order_free,
+                    self.flat_blocks.get_unchecked(left_index + 1).order_free,
+                )
+            };
 
             #[cfg(feature = "flame_profile")]
             neighbour_guard.end();
 
             #[cfg(feature = "flame_profile")]
             let parents_guard = flame::start_guard("update_parents");
-            self.flat_blocks[index - 1].order_free = cmp::max(left, right);
+            unsafe { self.flat_blocks.get_unchecked_mut(index - 1) }.order_free = cmp::max(left, right);
 
             #[cfg(feature = "flame_profile")]
             parents_guard.end();
