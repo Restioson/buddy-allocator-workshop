@@ -1,7 +1,6 @@
 #![feature(custom_attribute)]
 #![feature(plugin)]
 #![feature(nll)]
-#![plugin(phf_macros)]
 #![cfg_attr(feature = "flame_profile", plugin(flamer))]
 #![allow(unused_attributes)]
 
@@ -11,7 +10,6 @@ extern crate buddy_allocator_workshop;
 extern crate structopt;
 #[cfg(feature = "flame_profile")]
 extern crate flame;
-extern crate phf;
 #[macro_use]
 extern crate failure;
 
@@ -19,15 +17,6 @@ use buddy_allocator_workshop::*;
 use failure::Fail;
 use std::time::Instant;
 use structopt::StructOpt;
-
-#[rustfmt_skip] // Puts phf_map! with same indentation level as the key => value
-static DEMOS: phf::Map<&'static str, fn(bool, u32, u8)> = phf_map! {
-    "linked_lists" => buddy_allocator_lists::demo_linked_lists,
-    "vecs" => buddy_allocator_lists::demo_vecs,
-    "rb_tree_vecs" => buddy_allocator_tree::demo_vecs,
-    "rb_tree_linked_lists" => buddy_allocator_tree::demo_linked_lists,
-    "bitmap" => buddy_allocator_bitmap::demo,
-};
 
 const DEFAULT_DEMOS: &[&str] = &[
     "vecs",
@@ -99,17 +88,21 @@ fn main() {
         .into_iter()
         .map(|name| {
             (
-                DEMOS
-                    .get(&*name)
-                    .ok_or(DemosError::UnknownDemo { name: name.to_string() })
-                    .raise(),
-                name,
+                match &*name {
+                    "linked_lists" => buddy_allocator_lists::demo_linked_lists,
+                    "vecs" => buddy_allocator_lists::demo_vecs,
+                    "rb_tree_vecs" => buddy_allocator_tree::demo_vecs,
+                    "rb_tree_linked_lists" => buddy_allocator_tree::demo_linked_lists,
+                    "bitmap" => buddy_allocator_bitmap::demo,
+                    _ => Err(DemosError::UnknownDemo { name: name.to_string() }).raise(),
+                },
+                name
             )
         })
         .collect::<Vec<_>>() // Force detect unknown demos ASAP
         .into_iter()
         .for_each(|(demo, name)| {
-            run_demo(*demo, print_addresses, blocks, order, name)
+            run_demo(demo, print_addresses, blocks, order, name)
         });
 
     flame_dump();

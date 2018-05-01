@@ -97,7 +97,7 @@ impl Tree {
             index = match left_child.order_free() {
                 Some(o) if o >= desired_order => flat_tree::left_child(index),
                 _ => {
-                    addr += 1 << ((MAX_ORDER + MIN_ORDER - level - 1) as u32);
+                    addr |= 1 << ((MAX_ORDER + MIN_ORDER - level - 1) as u32);
                     flat_tree::right_child(index)
                 }
             };
@@ -111,7 +111,7 @@ impl Tree {
             #[cfg(feature = "flame_profile")]
             let _g = flame::start_guard("traverse_up_loop");
 
-            index = flat_tree::parent(index).unwrap();
+            index = flat_tree::parent(index);
 
             let (left, right) = (
                 &mut self.flat_blocks[flat_tree::left_child(index) - 1].order_free(),
@@ -145,13 +145,10 @@ mod flat_tree {
         2 * index + 1
     }
 
+    /// Gets the parent of an index. Will return 0 if the index is 1
     #[inline]
-    pub fn parent(index: usize) -> Option<usize> {
-        if index == 1 {
-            None
-        } else {
-            Some(index / 2)
-        }
+    pub fn parent(index: usize) -> usize {
+        index / 2
     }
 }
 
@@ -167,7 +164,7 @@ mod test {
         // 4 5 6 7
         assert_eq!(left_child(1), 2);
         assert_eq!(right_child(1), 3);
-        assert_eq!(parent(2).unwrap(), 1);
+        assert_eq!(parent(2), 1);
     }
 
     #[test]
