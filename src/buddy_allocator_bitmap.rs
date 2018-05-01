@@ -113,9 +113,11 @@ impl Tree {
 
             index = flat_tree::parent(index);
 
+            let left_index = flat_tree::left_child(index) - 1;
+
             let (left, right) = (
-                &mut self.flat_blocks[flat_tree::left_child(index) - 1].order_free(),
-                &mut self.flat_blocks[flat_tree::right_child(index) - 1].order_free(),
+                &mut self.flat_blocks[left_index].order_free(),
+                &mut self.flat_blocks[left_index + 1].order_free(),
             );
 
             if let Some(order) = cmp::max(left, right) {
