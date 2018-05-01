@@ -1,10 +1,8 @@
 ///! A modified buddy bitmap allocator
-
 #[cfg(feature = "flame_profile")]
 use flame;
 use std::cmp;
 use std::mem;
-
 use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 
 /// A block in the bitmap
@@ -65,10 +63,14 @@ impl Tree {
         const BLOCKS_IN_TREE: usize = Tree::blocks_in_tree(ORDERS);
         let mut flat_blocks: Box<[Block; BLOCKS_IN_TREE]> = box unsafe { mem::uninitialized() };
 
-        for (i, slot) in flat_blocks.iter_mut().enumerate() {
-            let order = MAX_ORDER as usize - ((i + 1) as f64).log2().floor() as usize;
-
-            *slot = Block::new_free(order as u8);
+        let mut start: usize = 0;
+        for level in 0..ORDERS {
+            let order = MAX_ORDER - level;
+            let size = 1 << (level as usize);
+            for block in start..(start + size) {
+                flat_blocks[block] = Block::new_free(order);
+            }
+            start += size;
         }
 
         Tree { flat_blocks }
@@ -81,7 +83,7 @@ impl Tree {
         match root.order_free() {
             Some(o) if o < desired_order => {
                 return None;
-            },
+            }
             None => return None,
             _ => (),
         };
@@ -94,7 +96,6 @@ impl Tree {
             let _loop_guard = flame::start_guard("tree_traverse_loop");
 
             let left_child_index = flat_tree::left_child(index);
-            let left_child = &mut self.flat_blocks[left_child_index - 1];
 
             #[cfg(feature = "flame_profile")]
             let _update_guard = flame::start_guard("tree_traverse_update");
@@ -178,7 +179,7 @@ mod test {
 
     #[test]
     fn test_flat_tree_fns() {
-        use self::flat_tree::*;
+        use super::flat_tree::*;
         //    1
         //  2   3
         // 4 5 6 7
@@ -193,13 +194,29 @@ mod test {
     }
 
     #[test]
+    fn test_init_tree() {
+        let tree = Tree::new();
+
+        // Highest level has 1 block, next has 2, next 4
+        assert_eq!(tree.flat_blocks[0].order_free, 19);
+
+        assert_eq!(tree.flat_blocks[1].order_free, 18);
+        assert_eq!(tree.flat_blocks[2].order_free, 18);
+
+        assert_eq!(tree.flat_blocks[3].order_free, 17);
+        assert_eq!(tree.flat_blocks[4].order_free, 17);
+        assert_eq!(tree.flat_blocks[5].order_free, 17);
+        assert_eq!(tree.flat_blocks[6].order_free, 17);
+    }
+
+    #[test]
     fn test_alloc_exact() {
         let mut tree = Tree::new();
         tree.alloc_exact(3).unwrap();
 
         tree = Tree::new();
-        assert_eq!(tree.alloc_exact(MAX_ORDER - 1).unwrap(), 0x0 as *const u8);
-        assert_eq!(tree.alloc_exact(MAX_ORDER - 1).unwrap(), (1024usize.pow(3) / 2) as *const u8);
+        assert_eq!(tree.alloc_exact(MAX_ORDER - 1), Some(0x0 as *const u8));
+        assert_eq!(tree.alloc_exact(MAX_ORDER - 1), Some((1024usize.pow(3) / 2) as *const u8));
         assert_eq!(tree.alloc_exact(0), None);
     }
 
