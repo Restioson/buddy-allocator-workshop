@@ -96,6 +96,7 @@ impl Tree {
             let _loop_guard = flame::start_guard("tree_traverse_loop");
 
             let left_child_index = flat_tree::left_child(index);
+            let left_child = &self.flat_blocks[left_child_index - 1];
 
             #[cfg(feature = "flame_profile")]
             let _update_guard = flame::start_guard("tree_traverse_update");
