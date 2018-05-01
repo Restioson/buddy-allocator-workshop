@@ -49,10 +49,21 @@ impl Tree {
         Tree { flat_blocks }
     }
 
+    #[inline]
+    fn block_mut(&mut self, index: usize) -> &mut Block {
+        unsafe { self.flat_blocks.get_unchecked_mut(index) }
+    }
+
+    #[inline]
+    fn block(&self, index: usize) -> &Block {
+        unsafe { self.flat_blocks.get_unchecked(index) }
+    }
+
     #[cfg_attr(feature = "flame_profile", flame)]
     pub fn alloc_exact(&mut self, desired_order: u8) -> Option<*const u8> {
-        let root = &mut unsafe { self.flat_blocks.get_unchecked(0) };
+        let root = &mut self.block_mut(0);
 
+        // If the root node has no orders free, or if it does not have the desired order free
         if root.order_free == 0 || (root.order_free + 1) < desired_order {
             return None;
         }
@@ -65,7 +76,7 @@ impl Tree {
             let _loop_guard = flame::start_guard("tree_traverse_loop");
 
             let left_child_index = flat_tree::left_child(index);
-            let left_child = unsafe { &self.flat_blocks.get_unchecked(left_child_index - 1) };
+            let left_child = self.block(left_child_index - 1);
 
             #[cfg(feature = "flame_profile")]
             let _update_guard = flame::start_guard("tree_traverse_update");
@@ -78,7 +89,7 @@ impl Tree {
             };
         }
 
-        let block = unsafe { self.flat_blocks.get_unchecked_mut(index - 1) };
+        let block = self.block_mut(index - 1);
         block.order_free = 0;
 
         // Iterate upwards and set parents accordingly
@@ -97,24 +108,21 @@ impl Tree {
             #[cfg(feature = "flame_profile")]
             let compute_left_index_guard = flame::start_guard("compute_left_index");
 
-            let left_index = flat_tree::left_child(index) - 1;
+            // Treat as right index because we need to be 0 indexed here!
+            let right_index = flat_tree::left_child(index);
 
             #[cfg(feature = "flame_profile")]
             compute_left_index_guard.end();
 
-            let (left, right) = unsafe {
-                (
-                    self.flat_blocks.get_unchecked(left_index).order_free,
-                    self.flat_blocks.get_unchecked(left_index + 1).order_free,
-                )
-            };
+            let left = self.block(right_index - 1).order_free;
+            let right = self.block(right_index).order_free;
 
             #[cfg(feature = "flame_profile")]
             neighbour_guard.end();
 
             #[cfg(feature = "flame_profile")]
             let parents_guard = flame::start_guard("update_parents");
-            unsafe { self.flat_blocks.get_unchecked_mut(index - 1) }.order_free = cmp::max(left, right);
+            self.block_mut(index - 1).order_free = cmp::max(left, right);
 
             #[cfg(feature = "flame_profile")]
             parents_guard.end();
@@ -152,7 +160,6 @@ pub fn demo(print_addresses: bool, blocks: u32, block_size: u8) {
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {
