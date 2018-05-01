@@ -117,6 +117,7 @@ impl Tree {
 
             index = flat_tree::parent(index);
 
+            #[cfg(feature = "flame_profile")]
             traverse_guard.end();
 
             #[cfg(feature = "flame_profile")]
@@ -129,6 +130,7 @@ impl Tree {
                 &mut self.flat_blocks[left_index + 1].order_free(),
             );
 
+            #[cfg(feature = "flame_profile")]
             neighbour_guard.end();
 
             #[cfg(feature = "flame_profile")]
@@ -138,6 +140,8 @@ impl Tree {
             } else {
                 self.flat_blocks[index - 1].set_used();
             }
+
+            #[cfg(feature = "flame_profile")]
             parents_guard.end();
         }
 
