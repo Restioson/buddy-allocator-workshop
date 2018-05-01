@@ -91,13 +91,13 @@ impl Tree {
 
         for level in 0..(MAX_ORDER - desired_order) {
             #[cfg(feature = "flame_profile")]
-            let loop_guard = flame::start_guard("tree_traverse_loop");
+            let _loop_guard = flame::start_guard("tree_traverse_loop");
 
             let left_child_index = flat_tree::left_child(index);
             let left_child = &mut self.flat_blocks[left_child_index - 1];
 
             #[cfg(feature = "flame_profile")]
-            let update_guard = flame::start_guard("tree_traverse_update");
+            let _update_guard = flame::start_guard("tree_traverse_update");
             index = match left_child.order_free() {
                 Some(o) if o >= desired_order => left_child_index,
                 _ => {
@@ -123,7 +123,13 @@ impl Tree {
             #[cfg(feature = "flame_profile")]
             let neighbour_guard = flame::start_guard("get_neighbours");
 
+            #[cfg(feature = "flame_profile")]
+            let compute_left_index_guard = flame::start_guard("compute_left_index");
+
             let left_index = flat_tree::left_child(index) - 1;
+
+            #[cfg(feature = "flame_profile")]
+            compute_left_index_guard.end();
 
             let (left, right) = (
                 &mut self.flat_blocks[left_index].order_free(),
@@ -161,11 +167,6 @@ mod flat_tree {
     }
 
     #[inline]
-    pub fn right_child(index: usize) -> usize {
-        (index << 1) + 1
-    }
-
-    #[inline]
     pub fn parent(index: usize) -> usize {
         index >> 1
     }
@@ -182,7 +183,6 @@ mod test {
         //  2   3
         // 4 5 6 7
         assert_eq!(left_child(1), 2);
-        assert_eq!(right_child(1), 3);
         assert_eq!(parent(2), 1);
     }
 
