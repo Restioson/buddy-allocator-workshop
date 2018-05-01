@@ -92,13 +92,14 @@ impl Tree {
             #[cfg(feature = "flame_profile")]
             let _g = flame::start_guard("tree_traverse_loop");
 
-            let left_child = &mut self.flat_blocks[flat_tree::left_child(index) - 1];
+            let left_child_index = flat_tree::left_child(index);
+            let left_child = &mut self.flat_blocks[left_child_index - 1];
 
             index = match left_child.order_free() {
-                Some(o) if o >= desired_order => flat_tree::left_child(index),
+                Some(o) if o >= desired_order => left_child_index,
                 _ => {
                     addr |= 1 << ((MAX_ORDER + MIN_ORDER - level - 1) as u32);
-                    flat_tree::right_child(index)
+                    left_child_index + 1
                 }
             };
         }
