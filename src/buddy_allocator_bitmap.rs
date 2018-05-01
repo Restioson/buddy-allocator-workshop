@@ -7,7 +7,7 @@ use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 
 /// A block in the bitmap
 struct Block {
-    /// The order of the biggest block under this block + 1
+    /// The order of the biggest block under this block + 1. 0 denotes used
     order_free: u8,
 }
 
@@ -17,33 +17,6 @@ impl Block {
         Block {
             order_free: order + 1,
         }
-    }
-
-    /// Gets the order of free blocks beneath and including this block if the block is free, else
-    /// `None`
-    #[inline]
-    pub fn order_free(&self) -> Option<u8> {
-        if self.order_free == 0 {
-            None
-        } else {
-            Some(self.order_free - 1)
-        }
-    }
-
-    #[inline]
-    fn set(&mut self, new: u8) {
-        self.order_free = new;
-    }
-
-    /// Set the order of the largest free block under this block
-    #[inline]
-    pub fn set_free(&mut self, free_order: u8) {
-        self.set(free_order + 1);
-    }
-
-    #[inline]
-    pub fn set_used(&mut self) {
-        self.set(0);
     }
 }
 
@@ -80,13 +53,9 @@ impl Tree {
     pub fn alloc_exact(&mut self, desired_order: u8) -> Option<*const u8> {
         let root = &mut self.flat_blocks[0];
 
-        match root.order_free() {
-            Some(o) if o < desired_order => {
-                return None;
-            }
-            None => return None,
-            _ => (),
-        };
+        if root.order_free == 0 || (root.order_free + 1) < desired_order {
+            return None;
+        }
 
         let mut addr = 0;
         let mut index = 1;
@@ -100,8 +69,8 @@ impl Tree {
 
             #[cfg(feature = "flame_profile")]
             let _update_guard = flame::start_guard("tree_traverse_update");
-            index = match left_child.order_free() {
-                Some(o) if o >= desired_order => left_child_index,
+            index = match left_child.order_free {
+                o if o != 0 && o >= desired_order => left_child_index,
                 _ => {
                     addr |= 1 << ((MAX_ORDER + MIN_ORDER - level - 1) as u32);
                     left_child_index + 1
@@ -110,7 +79,7 @@ impl Tree {
         }
 
         let block = &mut self.flat_blocks[index - 1];
-        block.set_used();
+        block.order_free = 0;
 
         // Iterate upwards and set parents accordingly
         for _ in 0..(MAX_ORDER - desired_order) {
@@ -134,8 +103,8 @@ impl Tree {
             compute_left_index_guard.end();
 
             let (left, right) = (
-                &mut self.flat_blocks[left_index].order_free(),
-                &mut self.flat_blocks[left_index + 1].order_free(),
+                self.flat_blocks[left_index].order_free,
+                self.flat_blocks[left_index + 1].order_free,
             );
 
             #[cfg(feature = "flame_profile")]
@@ -143,11 +112,7 @@ impl Tree {
 
             #[cfg(feature = "flame_profile")]
             let parents_guard = flame::start_guard("update_parents");
-            if let Some(order) = cmp::max(left, right) {
-                self.flat_blocks[index - 1].set_free(*order);
-            } else {
-                self.flat_blocks[index - 1].set_used();
-            }
+            self.flat_blocks[index - 1].order_free = cmp::max(left, right);
 
             #[cfg(feature = "flame_profile")]
             parents_guard.end();
@@ -173,6 +138,19 @@ mod flat_tree {
         index >> 1
     }
 }
+
+pub fn demo(print_addresses: bool, blocks: u32, block_size: u8) {
+    let mut allocator = Tree::new();
+
+    for _ in 0..blocks {
+        let addr = allocator.alloc_exact(block_size).unwrap();
+
+        if print_addresses {
+            println!("Address: {:#x}", addr as usize);
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -230,23 +208,12 @@ mod test {
 
         for _ in 0..1000 {
             let addr = tree.alloc_exact(0).unwrap();
+
             if seen.contains(&addr) {
                 panic!("Allocator must return addresses never been allocated before!");
             } else {
                 seen.push(addr);
             }
-        }
-    }
-}
-
-pub fn demo(print_addresses: bool, blocks: u32, block_size: u8) {
-    let mut allocator = Tree::new();
-
-    for _ in 0..blocks {
-        let addr = allocator.alloc_exact(block_size).unwrap();
-
-        if print_addresses {
-            println!("Address: {:#x}", addr as usize);
         }
     }
 }
