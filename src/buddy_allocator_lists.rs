@@ -5,6 +5,7 @@ use flame;
 
 use std::collections::LinkedList;
 use std::vec::Vec;
+use std::time::{Instant, Duration};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Block {
@@ -296,12 +297,12 @@ impl<L: BlockList> PhysicalAllocator for BuddyAllocator<L> {
     }
 }
 
-pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
+pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) -> Duration {
     let allocator = BuddyAllocator::<LinkedList<Block>>::new();
     demo(allocator, print_addresses, blocks, block_size)
 }
 
-pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) {
+pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) -> Duration {
     let allocator = BuddyAllocator::<Vec<Block>>::new();
     demo(allocator, print_addresses, blocks, block_size)
 }
@@ -311,13 +312,15 @@ fn demo<L: BlockList>(
     print_addresses: bool,
     blocks: u32,
     block_size: u8,
-) {
+) -> Duration {
     let top_level_blocks = top_level_blocks(blocks, block_size);
 
     for block_number in 0..top_level_blocks {
         allocator
             .create_top_level(2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize);
     }
+
+    let start = Instant::now();
 
     for _ in 0..blocks {
         let index = allocator.allocate_exact(block_size).unwrap();
@@ -327,6 +330,8 @@ fn demo<L: BlockList>(
             println!("Address: {:#x}", addr);
         }
     }
+
+    start.elapsed()
 }
 
 #[cfg(test)]

@@ -1,6 +1,8 @@
 ///! A modified buddy bitmap allocator
 use std::cmp;
+use std::collections::BTreeSet;
 use std::mem;
+use std::time::{Duration, Instant};
 use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 
 /// A block in the bitmap
@@ -47,13 +49,19 @@ impl Tree {
         Tree { flat_blocks }
     }
 
+    pub const fn blocks_in_level(order: u8) -> usize {
+        (1 << (MIN_ORDER + order) as usize) / (1 << (MIN_ORDER as usize))
+    }
+
     #[inline]
     unsafe fn block_mut(&mut self, index: usize) -> &mut Block {
+        debug_assert!(index < Tree::blocks_in_tree(ORDERS));
         self.flat_blocks.get_unchecked_mut(index)
     }
 
     #[inline]
     unsafe fn block(&self, index: usize) -> &Block {
+        debug_assert!(index < Tree::blocks_in_tree(ORDERS));
         self.flat_blocks.get_unchecked(index)
     }
 
@@ -103,7 +111,6 @@ impl Tree {
     }
 }
 
-
 /// Flat tree things.
 ///
 /// # Note
@@ -120,16 +127,32 @@ mod flat_tree {
     }
 }
 
-pub fn demo(print_addresses: bool, blocks: u32, block_size: u8) {
-    let mut allocator = Tree::new();
+pub fn demo(print_addresses: bool, blocks: u32, order: u8) -> Duration {
+    let num_trees = ((blocks as f32) / (Tree::blocks_in_level(MAX_ORDER - order) as f32)).ceil() as usize;
+
+    let mut trees = Vec::with_capacity(num_trees);
+    for _ in 0..num_trees {
+        trees.push(Tree::new());
+    }
+
+    let start = Instant::now();
+    let mut current_tree = 0;
 
     for _ in 0..blocks {
-        let addr = allocator.alloc_exact(block_size).unwrap();
+        let addr = match trees[current_tree].alloc_exact(order) {
+            Some(addr) => addr,
+            None => {
+                current_tree += 1;
+                trees[current_tree].alloc_exact(order).unwrap()
+            }
+        };
 
         if print_addresses {
             println!("Address: {:#x}", addr as usize);
         }
     }
+
+    start.elapsed()
 }
 
 #[cfg(test)]
@@ -150,6 +173,17 @@ mod test {
     fn test_blocks_in_tree() {
         assert_eq!(Tree::blocks_in_tree(3), 1 + 2 + 4);
         assert_eq!(Tree::blocks_in_tree(1), 1);
+    }
+
+    #[test]
+    fn test_tree_runs_out_of_blocks() {
+        let mut tree = Tree::new();
+        let max_blocks = Tree::blocks_in_level(MAX_ORDER);
+        for _ in 0..max_blocks {
+            assert_ne!(tree.alloc_exact(0), None);
+        }
+
+        assert_eq!(tree.alloc_exact(0), None);
     }
 
     #[test]
@@ -181,18 +215,17 @@ mod test {
 
     #[test]
     fn test_alloc_unique_addresses() {
-        let mut seen = Vec::with_capacity(1000);
+        let max_blocks = Tree::blocks_in_level(MAX_ORDER);
+        let mut seen = BTreeSet::new();
         let mut tree = Tree::new();
 
-        println!();
-
-        for _ in 0..1000 {
+        for _ in 0..max_blocks {
             let addr = tree.alloc_exact(0).unwrap();
 
             if seen.contains(&addr) {
                 panic!("Allocator must return addresses never been allocated before!");
             } else {
-                seen.push(addr);
+                seen.insert(addr);
             }
         }
     }

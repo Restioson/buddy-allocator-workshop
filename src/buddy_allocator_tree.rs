@@ -8,6 +8,7 @@ use intrusive_collections::{KeyAdapter, RBTree, RBTreeLink, SinglyLinkedList, Si
 use std::cell::Cell;
 use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use std::ptr;
+use std::time::{Instant, Duration};
 
 #[derive(Debug)]
 pub struct Block {
@@ -330,12 +331,12 @@ pub enum BlockAllocateError {
     OrderTooLarge(u8),
 }
 
-pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) {
+pub fn demo_vecs(print_addresses: bool, blocks: u32, block_size: u8) -> Duration {
     let allocator = BuddyAllocator::<Vec<*const Block>>::new();
     demo(allocator, print_addresses, blocks, block_size)
 }
 
-pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) {
+pub fn demo_linked_lists(print_addresses: bool, blocks: u32, block_size: u8) -> Duration {
     let allocator = BuddyAllocator::<SinglyLinkedList<BlockPtrAdapter>>::new();
     demo(allocator, print_addresses, blocks, block_size)
 }
@@ -345,13 +346,15 @@ fn demo<L: FreeList>(
     print_addresses: bool,
     blocks: u32,
     block_size: u8,
-) {
+) -> Duration {
     let top_level_blocks = top_level_blocks(blocks, block_size);
 
     for block_number in 0..top_level_blocks {
         allocator
             .create_top_level(2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize);
     }
+
+    let begin = Instant::now();
 
     for _ in 0..blocks {
         let cursor = allocator.allocate_exact(block_size).unwrap();
@@ -361,6 +364,8 @@ fn demo<L: FreeList>(
             println!("Address: {:#x}", addr);
         }
     }
+
+    begin.elapsed()
 }
 
 #[cfg(test)]
