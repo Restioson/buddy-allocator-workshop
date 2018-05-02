@@ -7,7 +7,7 @@ use super::{MAX_ORDER, MIN_ORDER, ORDERS};
 
 /// A block in the bitmap
 struct Block {
-    /// The order of the biggest block under this block + 1. 0 denotes used
+    /// The order of the biggest block under this block - 1. 0 denotes used
     order_free: u8,
 }
 
@@ -209,8 +209,16 @@ mod test {
 
         tree = Tree::new();
         assert_eq!(tree.alloc_exact(MAX_ORDER - 1), Some(0x0 as *const u8));
-        assert_eq!(tree.alloc_exact(MAX_ORDER - 1), Some((1024usize.pow(3) / 2) as *const u8));
+        assert_eq!(
+            tree.alloc_exact(MAX_ORDER - 1),
+            Some((2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32) / 2) as *const u8)
+        );
         assert_eq!(tree.alloc_exact(0), None);
+        assert_eq!(tree.alloc_exact(MAX_ORDER - 1), None);
+
+        tree = Tree::new();
+        assert_eq!(tree.alloc_exact(MAX_ORDER), Some(0x0 as *const u8));
+        assert_eq!(tree.alloc_exact(MAX_ORDER), None);
     }
 
     #[test]

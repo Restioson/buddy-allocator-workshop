@@ -35,12 +35,13 @@ please see [Contributing][contributing section].
 
 ### Table
 
-| Implementation                | Time  | Throughput      |
-|-------------------------------|-------|-----------------|
-| Lists - Vectors               | 2 min  | ~8.33e-3 GiB/s |
-| Lists - Doubly Linked Lists   | 25min | ~6.66e-4 GiB/s  |
-| RB Trees - Vectors            | ~0.3s | ~3.33 GiB/s     |
-| RB Trees - Singly Linked Lists| ~0.5s | ~2 GiB/s        |
+| Implementation                | Time   | Throughput      |
+|-------------------------------|--------|-----------------|
+| Lists - Vectors               | 2 min  | ~8.33e-3 GiB/s  |
+| Lists - Doubly Linked Lists   | 25min  | ~6.66e-4 GiB/s  |
+| RB Trees - Vectors            | ~0.3s  | ~3.33 GiB/s     |
+| RB Trees - Singly Linked Lists| ~0.5s  | ~2 GiB/s        |
+| Bitmap Tree                   | ~0.07s | ~14.28 GiB/s    |
 
 **Note:** The throughput is extrapolated from the time it took to
 allocate 1 GiB in 4kib blocks. For implementations that have complexity
@@ -149,6 +150,64 @@ due to red-black trees having `O(log n)` operations across the board,
 faster than the searches, inserts, and removes of vectors or linked
 lists.
 
+## Bitmap Tree Buddy Allocator
+
+This implementation is not strictly a bitmap, per se, but is a
+modification of a bitmap system. Essentially, each block in the tree
+stores the largest order (fully merged) *somewhere* underneath it. For
+instance, a tree which is all free with 4 orders looks like this:
+
+```
+       3
+    2      2
+ 1   1   1   1
+0 0 0 0 0 0 0 0
+```
+
+If we allocate one order 0 block, it looks like this (T is **t**aken):
+
+```
+       2
+    1      2
+ 0   1   1   1
+T 0 0 0 0 0 0 0
+```
+
+It is implemented as a flattened array, where for a tree like
+```
+   1
+ 2   3
+ ```
+
+the representation is `1; 2; 3`. This has the nice property that if we
+use indices beginning at 1 (i.e indices and not offsets), then the index
+of the left child of any given index is `2 * index`, and the right child
+is simply `2 * index + 1`. The parent is `floor(index / 2)`. Because all
+of these operations work with 2s, we can use efficient bitshifting to
+execute them (`index << 1`, `(index << 1) | 1`, and `index >> 1`).
+
+We can do a binary search to find the a block that is free of the
+desired order. First, we check if there are any blocks of the desired
+order free by checking the root block. If there are, we check if the
+left child has enough free. If it does, then we again check it's left
+child, etc. If a block's left child does not have enough blocks free, we
+simply use its right child. We know that the right child must then have
+enough free, or the root block is invalid.
+
+
+This implementation was *very fast.* On my computer, it only took ~0.07s
+to allocate 1GiB. I have seen it perform up to 0.04s on my computer,
+though -- performance does fluctuate a bit. I assume that this is to do
+with CPU load.
+
+This implementation does not have very good cache locality, as levels
+are stored far from eachother, so a parent block can be very far from
+its child. However, everything else is still very fast, so it is made
+up for. It is also O(log n), but practically it is so fast that this
+does not really matter. For reference: allocating 8GiB took 0.6s for me,
+but I have seen it perform much better at >150ms on [@gegy1000][gegy]'s
+laptop.
+
 # Contributing
 
 If you have any thing to add (such as an edit to the readme or another
@@ -167,4 +226,5 @@ to ping me on the [Rust Discord][rust discord] (Restioson#8323).
 [contributing section]: https://github.com/Restioson/buddy-allocator-workshop#contributing
 [btreemap]: https://doc.rust-lang.org/std/collections/struct.BTreeMap.html
 [find_or_split trees]: https://github.com/Restioson/buddy-allocator-workshop/blob/master/src/buddy_allocator_tree.rs#L225
-[vectors as free lists]:https://github.com/Restioson/buddy-allocator-workshop#vectors-as-free-lists
+[vectors as free lists]: https://github.com/Restioson/buddy-allocator-workshop#vectors-as-free-lists
+[gegy]: https://github.com/gegy1000
