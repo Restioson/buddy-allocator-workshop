@@ -1,4 +1,4 @@
-use super::{top_level_blocks, MAX_ORDER, MIN_ORDER, ORDERS};
+use super::{top_level_blocks, MAX_ORDER, BASE_ORDER, LEVEL_COUNT, TOP_ORDER};
 use array_init;
 use bit_field::BitField;
 #[cfg(feature = "flame_profile")]
@@ -95,7 +95,7 @@ impl Eq for Block {}
 #[derive(Debug)]
 pub struct BuddyAllocator<L: FreeList> {
     tree: RBTree<BlockAdapter>,
-    free: [L; ORDERS as usize],
+    free: [L; LEVEL_COUNT as usize],
 }
 
 pub trait FreeList {
@@ -220,7 +220,7 @@ impl<L: FreeList> BuddyAllocator<L> {
                 if n == 0 {
                     block.address()
                 } else {
-                    block.address() + 2usize.pow(u32::from(order + MIN_ORDER))
+                    block.address() + 2usize.pow(u32::from(order + BASE_ORDER))
                 },
                 order,
                 false,
@@ -351,7 +351,7 @@ fn demo<L: FreeList>(
 
     for block_number in 0..top_level_blocks {
         allocator
-            .create_top_level(2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize);
+            .create_top_level(2usize.pow(u32::from(MAX_ORDER + BASE_ORDER)) * block_number as usize);
     }
 
     let begin = Instant::now();
@@ -376,11 +376,11 @@ mod test {
     fn test_create_top_level() {
         let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(2usize.pow((MIN_ORDER + MAX_ORDER) as u32));
+        allocator.create_top_level(2usize.pow(TOP_ORDER as u32));
 
         let expected = vec![
             Block::new(0, MAX_ORDER, false),
-            Block::new(2usize.pow((MIN_ORDER + MAX_ORDER) as u32), MAX_ORDER, false),
+            Block::new(2usize.pow(TOP_ORDER as u32), MAX_ORDER, false),
         ];
 
         assert_eq!(
@@ -402,7 +402,7 @@ mod test {
         let expected = vec![
             Block::new(0, MAX_ORDER - 1, false),
             Block::new(
-                2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32),
+                2usize.pow((TOP_ORDER - 1) as u32),
                 MAX_ORDER - 1,
                 false,
             ),
@@ -459,7 +459,7 @@ mod test {
 
         for block_number in 0..top_level_blocks(1000, 0) {
             allocator.create_top_level(
-                2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+                2usize.pow((MAX_ORDER + BASE_ORDER) as u32) * block_number as usize,
             );
         }
 
@@ -482,7 +482,7 @@ mod test {
 
         for block_number in 0..top_level_blocks(1000, 0) {
             allocator.create_top_level(
-                2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+                2usize.pow((MAX_ORDER + BASE_ORDER) as u32) * block_number as usize,
             );
         }
 

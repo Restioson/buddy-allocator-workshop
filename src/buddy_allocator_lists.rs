@@ -1,4 +1,4 @@
-use super::{top_level_blocks, PageSize, PhysicalAllocator, MAX_ORDER, MIN_ORDER, ORDERS};
+use super::{top_level_blocks, PageSize, PhysicalAllocator, MAX_ORDER, BASE_ORDER, LEVEL_COUNT};
 use array_init;
 #[cfg(feature = "flame_profile")]
 use flame;
@@ -109,7 +109,7 @@ impl BlockList for Vec<Block> {
 }
 
 pub struct BuddyAllocator<L: BlockList> {
-    lists: [L; ORDERS as usize],
+    lists: [L; LEVEL_COUNT as usize],
 }
 
 /// A very temporary block index. Is not to be trusted to remain pointing to the same block. Use at
@@ -207,7 +207,7 @@ impl<L: BlockList> BuddyAllocator<L> {
             begin_address: if n == 0 {
                 block.begin_address
             } else {
-                block.begin_address + 2usize.pow(u32::from(order + MIN_ORDER))
+                block.begin_address + 2usize.pow(u32::from(order + BASE_ORDER))
             },
             order,
             state: BlockState::Free,
@@ -286,7 +286,7 @@ pub enum BlockAllocateError {
 
 impl<L: BlockList> PhysicalAllocator for BuddyAllocator<L> {
     fn alloc(&mut self, size: PageSize) -> *const u8 {
-        let index = self.allocate_exact(size.power_of_two() - MIN_ORDER)
+        let index = self.allocate_exact(size.power_of_two() - BASE_ORDER)
             .unwrap();
         let block = self.get(&index).unwrap();
         block.begin_address as *const u8
@@ -317,7 +317,7 @@ fn demo<L: BlockList>(
 
     for block_number in 0..top_level_blocks {
         allocator
-            .create_top_level(2usize.pow(u32::from(MAX_ORDER + MIN_ORDER)) * block_number as usize);
+            .create_top_level(2usize.pow(u32::from(MAX_ORDER + BASE_ORDER)) * block_number as usize);
     }
 
     let start = Instant::now();
@@ -337,11 +337,13 @@ fn demo<L: BlockList>(
 #[cfg(test)]
 mod test {
     use super::*;
+    use ::TOP_ORDER;
+
     #[test]
     fn test_create_top_level() {
         let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(2usize.pow((MIN_ORDER + MAX_ORDER) as u32));
+        allocator.create_top_level(2usize.pow(TOP_ORDER as u32));
 
         let expected = vec![
             Block {
@@ -350,7 +352,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32),
+                begin_address: 2usize.pow(TOP_ORDER as u32),
                 order: MAX_ORDER,
                 state: BlockState::Free,
             },
@@ -378,7 +380,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32 - 1),
+                begin_address: 2usize.pow(TOP_ORDER as u32 - 1),
                 order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
@@ -397,7 +399,7 @@ mod test {
     fn test_get_linked_list() {
         let mut allocator = BuddyAllocator::<LinkedList<Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(2usize.pow((MAX_ORDER + MIN_ORDER) as u32) as usize);
+        allocator.create_top_level(2usize.pow((MAX_ORDER + BASE_ORDER) as u32) as usize);
 
         let mut indices: [BlockIndex; 2] = array_init::array_init(|_| {
             allocator
@@ -417,7 +419,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER) as u32 - 1) * indices[1].index,
+                begin_address: 2usize.pow(TOP_ORDER as u32 - 1) * indices[1].index,
                 order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
@@ -453,7 +455,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32) * indices[1].index,
+                begin_address: 2usize.pow((TOP_ORDER - 1) as u32) * indices[1].index,
                 order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
@@ -498,7 +500,7 @@ mod test {
 
         for block_number in 0..top_level_blocks(1000, 0) {
             allocator.create_top_level(
-                2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+                2usize.pow((MAX_ORDER + BASE_ORDER) as u32) * block_number as usize,
             );
         }
         let mut seen = Vec::with_capacity(1000);
@@ -520,7 +522,7 @@ mod test {
 
         for block_number in 0..top_level_blocks(1000, 0) {
             allocator.create_top_level(
-                2usize.pow((MAX_ORDER + MIN_ORDER) as u32) * block_number as usize,
+                2usize.pow((MAX_ORDER + BASE_ORDER) as u32) * block_number as usize,
             );
         }
 

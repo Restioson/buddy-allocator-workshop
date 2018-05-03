@@ -7,7 +7,7 @@ use criterion::Criterion;
 
 fn bitmap(c: &mut Criterion) {
     use buddy_allocator_workshop::buddy_allocator_bitmap::*;
-    use buddy_allocator_workshop::{MAX_ORDER, MIN_ORDER};
+    use buddy_allocator_workshop::{MAX_ORDER, BASE_ORDER};
 
     let mut tree = Tree::new();
 

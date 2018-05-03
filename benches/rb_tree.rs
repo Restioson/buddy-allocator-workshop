@@ -6,11 +6,11 @@ use criterion::Criterion;
 
 fn rb_tree_vecs(c: &mut Criterion) {
     use buddy_allocator_workshop::buddy_allocator_tree::*;
-    use buddy_allocator_workshop::{MAX_ORDER, MIN_ORDER};
+    use buddy_allocator_workshop::{MAX_ORDER, BASE_ORDER};
 
     let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
     allocator.create_top_level(0);
-    allocator.create_top_level(2usize.pow((MIN_ORDER + MAX_ORDER) as u32));
+    allocator.create_top_level(2usize.pow((BASE_ORDER + MAX_ORDER) as u32));
 
     let mut blocks_created_top_level = 1;
 
@@ -19,7 +19,7 @@ fn rb_tree_vecs(c: &mut Criterion) {
             match allocator.allocate_exact(0) {
                 Ok(_) => (),
                 Err(BlockAllocateError::NoBlocksAvailable) => {
-                    let size_of_block = 2usize.pow((MIN_ORDER + MAX_ORDER) as u32);
+                    let size_of_block = 2usize.pow((BASE_ORDER + MAX_ORDER) as u32);
                     allocator.create_top_level(size_of_block * blocks_created_top_level);
                     blocks_created_top_level += 1;
                 }

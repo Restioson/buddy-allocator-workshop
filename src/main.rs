@@ -15,7 +15,6 @@ extern crate failure;
 
 use buddy_allocator_workshop::*;
 use failure::Fail;
-use std::time::Instant;
 use structopt::StructOpt;
 use std::time::Duration;
 
@@ -75,7 +74,7 @@ fn main() {
 
     let (blocks, order) = (
         blocks.unwrap_or(100_000),
-        order.unwrap_or(PageSize::Kib4.power_of_two() - MIN_ORDER),
+        order.unwrap_or(PageSize::Kib4.power_of_two() - BASE_ORDER),
     );
 
     if order > MAX_ORDER {

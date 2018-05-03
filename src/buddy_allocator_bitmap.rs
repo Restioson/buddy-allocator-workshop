@@ -1,9 +1,8 @@
 ///! A modified buddy bitmap allocator
 use std::cmp;
-use std::collections::BTreeSet;
 use std::mem;
 use std::time::{Duration, Instant};
-use super::{MAX_ORDER, MIN_ORDER, ORDERS};
+use super::{BASE_ORDER, LEVEL_COUNT, MAX_ORDER, TOP_ORDER};
 
 /// A block in the bitmap
 struct Block {
@@ -24,7 +23,7 @@ impl Block {
 // TODO i might have a *few* cache misses here, eh?
 pub struct Tree {
     /// Flat array representation of tree. Used with the help of the `flat_tree` crate.
-    flat_blocks: Box<[Block; Tree::blocks_in_tree(ORDERS)]>,
+    flat_blocks: Box<[Block; Tree::blocks_in_tree(LEVEL_COUNT)]>,
 }
 
 impl Tree {
@@ -33,11 +32,11 @@ impl Tree {
     }
 
     pub fn new() -> Tree {
-        const BLOCKS_IN_TREE: usize = Tree::blocks_in_tree(ORDERS);
+        const BLOCKS_IN_TREE: usize = Tree::blocks_in_tree(LEVEL_COUNT);
         let mut flat_blocks: Box<[Block; BLOCKS_IN_TREE]> = box unsafe { mem::uninitialized() };
 
         let mut start: usize = 0;
-        for level in 0..ORDERS {
+        for level in 0..LEVEL_COUNT {
             let order = MAX_ORDER - level;
             let size = 1 << (level as usize);
             for block in start..(start + size) {
@@ -50,61 +49,68 @@ impl Tree {
     }
 
     pub const fn blocks_in_level(order: u8) -> usize {
-        (1 << (MIN_ORDER + order) as usize) / (1 << (MIN_ORDER as usize))
+        (1 << (BASE_ORDER + order) as usize) / (1 << (BASE_ORDER as usize))
     }
 
     #[inline]
     unsafe fn block_mut(&mut self, index: usize) -> &mut Block {
-        debug_assert!(index < Tree::blocks_in_tree(ORDERS));
+        debug_assert!(index <= Tree::blocks_in_tree(LEVEL_COUNT));
         self.flat_blocks.get_unchecked_mut(index)
     }
 
     #[inline]
     unsafe fn block(&self, index: usize) -> &Block {
-        debug_assert!(index < Tree::blocks_in_tree(ORDERS));
+        debug_assert!(index <= Tree::blocks_in_tree(LEVEL_COUNT));
         self.flat_blocks.get_unchecked(index)
     }
 
     pub fn alloc_exact(&mut self, desired_order: u8) -> Option<*const u8> {
-        let root = unsafe { &mut self.block_mut(0) };
+        let root = unsafe { self.block_mut(0) };
 
         // If the root node has no orders free, or if it does not have the desired order free
-        if root.order_free == 0 || (root.order_free + 1) < desired_order {
+        if root.order_free == 0 || (root.order_free - 1) < desired_order {
             return None;
         }
 
-        let mut addr = 0;
-        let mut index = 1;
+        let mut addr: u32 = 0;
+        let mut node_index = 1;
 
         let max_level = MAX_ORDER - desired_order;
 
         for level in 0..max_level {
-            let left_child_index = flat_tree::left_child(index);
+            let left_child_index = flat_tree::left_child(node_index);
             let left_child = unsafe { self.block(left_child_index - 1) };
 
-            index = match left_child.order_free {
-                o if o != 0 && o >= desired_order => left_child_index,
-                _ => {
-                    addr |= 1 << ((MAX_ORDER + MIN_ORDER - level - 1) as u32);
-                    left_child_index + 1
-                }
+            let o = left_child.order_free;
+            // If the child is not used (o!=0) or (desired_order in o-1)
+            // Due to the +1 offset, we need to subtract 1 from 0:
+            // However, (o - 1) >= desired_order can be simplified to o > desired_order
+            node_index = if o != 0 && o > desired_order {
+                left_child_index
+            } else {
+                // Move over to the right: if the parent had a free order and the left didn't, the right must, or the parent is invalid and does not uphold invariants
+                // Since the address is moving from the left hand side, we need to increase it
+                // Block size in bytes = 2^(BASE_ORDER + order)
+                // We also only want to allocate on the order of the child, hence subtracting 1
+                addr += 1 << ((TOP_ORDER - level - 1) as u32);
+                left_child_index + 1
             };
         }
 
-        let block = unsafe { self.block_mut(index - 1) };
+        let block = unsafe { self.block_mut(node_index - 1) };
         block.order_free = 0;
 
         // Iterate upwards and set parents accordingly
         for _ in 0..max_level {
-            index = flat_tree::parent(index);
-
             // Treat as right index because we need to be 0 indexed here!
-            let right_index = flat_tree::left_child(index);
+            // If we exclude the last bit, we'll always get an even number (the left node while 1 indexed)
+            let right_index = node_index & !1;
+            node_index = flat_tree::parent(node_index);
 
             let left = unsafe { self.block(right_index - 1) }.order_free;
             let right = unsafe { self.block(right_index) }.order_free;
 
-            unsafe { self.block_mut(index - 1) }.order_free = cmp::max(left, right);
+            unsafe { self.block_mut(node_index - 1) }.order_free = cmp::max(left, right);
         }
 
         Some(addr as *const u8)
@@ -157,6 +163,7 @@ pub fn demo(print_addresses: bool, blocks: u32, order: u8) -> Duration {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeSet;
     use super::*;
 
     #[test]
@@ -211,7 +218,7 @@ mod test {
         assert_eq!(tree.alloc_exact(MAX_ORDER - 1), Some(0x0 as *const u8));
         assert_eq!(
             tree.alloc_exact(MAX_ORDER - 1),
-            Some((2usize.pow((MIN_ORDER + MAX_ORDER - 1) as u32) / 2) as *const u8)
+            Some((2usize.pow(TOP_ORDER as u32) / 2) as *const u8)
         );
         assert_eq!(tree.alloc_exact(0), None);
         assert_eq!(tree.alloc_exact(MAX_ORDER - 1), None);
