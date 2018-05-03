@@ -54,13 +54,13 @@ impl Tree {
 
     #[inline]
     unsafe fn block_mut(&mut self, index: usize) -> &mut Block {
-        debug_assert!(index <= Tree::blocks_in_tree(LEVEL_COUNT));
+        debug_assert!(index < Tree::blocks_in_tree(LEVEL_COUNT));
         self.flat_blocks.get_unchecked_mut(index)
     }
 
     #[inline]
     unsafe fn block(&self, index: usize) -> &Block {
-        debug_assert!(index <= Tree::blocks_in_tree(LEVEL_COUNT));
+        debug_assert!(index < Tree::blocks_in_tree(LEVEL_COUNT));
         self.flat_blocks.get_unchecked(index)
     }
 
