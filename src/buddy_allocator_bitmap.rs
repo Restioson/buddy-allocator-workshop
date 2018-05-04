@@ -2,7 +2,7 @@
 use std::cmp;
 use std::mem;
 use std::time::{Duration, Instant};
-use super::{BASE_ORDER, LEVEL_COUNT, MAX_ORDER, TOP_ORDER};
+use super::{BASE_ORDER, LEVEL_COUNT, MAX_ORDER, MAX_ORDER_SIZE};
 
 /// A block in the bitmap
 struct Block {
@@ -92,7 +92,7 @@ impl Tree {
                 // Since the address is moving from the left hand side, we need to increase it
                 // Block size in bytes = 2^(BASE_ORDER + order)
                 // We also only want to allocate on the order of the child, hence subtracting 1
-                addr += 1 << ((TOP_ORDER - level - 1) as u32);
+                addr += 1 << ((MAX_ORDER_SIZE - level - 1) as u32);
                 left_child_index + 1
             };
         }
@@ -218,7 +218,7 @@ mod test {
         assert_eq!(tree.alloc_exact(MAX_ORDER - 1), Some(0x0 as *const u8));
         assert_eq!(
             tree.alloc_exact(MAX_ORDER - 1),
-            Some((2usize.pow(TOP_ORDER as u32) / 2) as *const u8)
+            Some((2usize.pow(MAX_ORDER_SIZE as u32) / 2) as *const u8)
         );
         assert_eq!(tree.alloc_exact(0), None);
         assert_eq!(tree.alloc_exact(MAX_ORDER - 1), None);

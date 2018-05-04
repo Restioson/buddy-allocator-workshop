@@ -337,13 +337,13 @@ fn demo<L: BlockList>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use ::TOP_ORDER;
+    use ::MAX_ORDER_SIZE;
 
     #[test]
     fn test_create_top_level() {
         let mut allocator = BuddyAllocator::<Vec<Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(2usize.pow(TOP_ORDER as u32));
+        allocator.create_top_level(2usize.pow(MAX_ORDER_SIZE as u32));
 
         let expected = vec![
             Block {
@@ -352,7 +352,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow(TOP_ORDER as u32),
+                begin_address: 2usize.pow(MAX_ORDER_SIZE as u32),
                 order: MAX_ORDER,
                 state: BlockState::Free,
             },
@@ -380,7 +380,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow(TOP_ORDER as u32 - 1),
+                begin_address: 2usize.pow(MAX_ORDER_SIZE as u32 - 1),
                 order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
@@ -419,7 +419,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow(TOP_ORDER as u32 - 1) * indices[1].index,
+                begin_address: 2usize.pow(MAX_ORDER_SIZE as u32 - 1) * indices[1].index,
                 order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },
@@ -455,7 +455,7 @@ mod test {
                 state: BlockState::Free,
             },
             Block {
-                begin_address: 2usize.pow((TOP_ORDER - 1) as u32) * indices[1].index,
+                begin_address: 2usize.pow((MAX_ORDER_SIZE - 1) as u32) * indices[1].index,
                 order: MAX_ORDER - 1,
                 state: BlockState::Free,
             },

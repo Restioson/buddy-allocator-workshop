@@ -1,4 +1,4 @@
-use super::{top_level_blocks, MAX_ORDER, BASE_ORDER, LEVEL_COUNT, TOP_ORDER};
+use super::{top_level_blocks, MAX_ORDER, BASE_ORDER, LEVEL_COUNT, MAX_ORDER_SIZE};
 use array_init;
 use bit_field::BitField;
 #[cfg(feature = "flame_profile")]
@@ -376,11 +376,11 @@ mod test {
     fn test_create_top_level() {
         let mut allocator = BuddyAllocator::<Vec<*const Block>>::new();
         allocator.create_top_level(0);
-        allocator.create_top_level(2usize.pow(TOP_ORDER as u32));
+        allocator.create_top_level(2usize.pow(MAX_ORDER_SIZE as u32));
 
         let expected = vec![
             Block::new(0, MAX_ORDER, false),
-            Block::new(2usize.pow(TOP_ORDER as u32), MAX_ORDER, false),
+            Block::new(2usize.pow(MAX_ORDER_SIZE as u32), MAX_ORDER, false),
         ];
 
         assert_eq!(
@@ -402,7 +402,7 @@ mod test {
         let expected = vec![
             Block::new(0, MAX_ORDER - 1, false),
             Block::new(
-                2usize.pow((TOP_ORDER - 1) as u32),
+                2usize.pow((MAX_ORDER_SIZE - 1) as u32),
                 MAX_ORDER - 1,
                 false,
             ),
