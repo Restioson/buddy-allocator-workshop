@@ -1,3 +1,8 @@
+**Archive notice**: this project was always a small personal project. I have
+archived it since I have moved on and am not going to be updating it or
+maintaining it in future. Feel free to fork this if you need to!
+
+
 # Buddy Allocator Workshop
 
 This repository contains some small example implementations of
